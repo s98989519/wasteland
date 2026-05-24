@@ -177,6 +177,9 @@ class EventSystem {
                         const scrapFound = Math.floor(Math.random() * 20) + 10;
                         Logger.log(`你在車廂裡找到了一些舊世幣 (${scrapFound})！`, "important");
                         this.game.addScrap(scrapFound);
+                        if (this.game.buildSystem && Math.random() < 0.1) {
+                            this.game.buildSystem.discoverNote('scrap_recycling');
+                        }
                         if (this.game.ui && this.game.ui.showResultModal) {
                             this.game.ui.showResultModal(
                                 "搜刮成功",
@@ -257,5 +260,17 @@ class EventSystem {
                 }
             ]
         };
+    }
+
+    exportData() {
+        return {
+            lastStep: this.lastStep,
+            restState: this.restState
+        };
+    }
+
+    importData(data) {
+        if (data.lastStep !== undefined) this.lastStep = data.lastStep;
+        if (data.restState !== undefined) this.restState = data.restState;
     }
 }

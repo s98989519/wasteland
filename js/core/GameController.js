@@ -5,6 +5,8 @@ class GameController {
         this.eventSystem = new EventSystem(this);
         this.inventorySystem = new InventorySystem(this);
         this.combatSystem = new CombatSystem(this);
+        this.buildSystem = new BuildSystem(this);
+        this.saveSystem = new SaveSystem(this);
         this.state = {
             inExpedition: false,
             inCombat: false,
@@ -21,9 +23,56 @@ class GameController {
         this.init();
     }
 
+    exportData() {
+        return this.state;
+    }
+
+    importData(data) {
+        this.state = { ...this.state, ...data };
+    }
+
     init() {
+        if (this.saveSystem && this.saveSystem.load()) {
+            if (this.state.inCombat) {
+                this.ui.showExpedition();
+                this.ui.showCombatView();
+                
+                // --- Recovery logic for broken saves ---
+                if (this.combatSystem.turnState === 'EXECUTING') {
+                    this.combatSystem.turnState = 'SELECTING_ACTION';
+                    this.combatSystem.selectedActionType = null;
+                }
+                const aliveEnemies = this.combatSystem.enemies.filter(e => !e.isDead);
+                if (aliveEnemies.length > 0 && aliveEnemies.some(e => !e.nextAction)) {
+                    this.combatSystem.turn = Math.max(0, this.combatSystem.turn - 1);
+                    this.combatSystem.startPlayerTurn();
+                } else {
+                    this.combatSystem.updateUI();
+                }
+                // ----------------------------------------
+
+                Logger.log("從戰鬥中恢復記憶。", "important");
+            } else if (this.state.inExpedition) {
+                this.ui.showExpedition();
+                this.ui.hideCombatView();
+                this.ui.showTopBar();
+                Logger.log(`回到探索深度 ${this.state.depth}。`, "important");
+                this.triggerCurrentEvent();
+            } else {
+                this.ui.showHub();
+            }
+            this.updateUI();
+        } else {
+            this.ui.showHub();
+            this.updateUI();
+        }
+        
+        if (this.saveSystem) this.saveSystem.isSavingEnabled = true;
+    }
+
+    updateUI() {
         this.ui.updateStats(this.state);
-        this.ui.showHub();
+        if (this.saveSystem) this.saveSystem.save();
     }
 
     startExpedition() {
@@ -38,7 +87,7 @@ class GameController {
     }
 
     triggerCurrentEvent() {
-        this.ui.updateStats(this.state);
+        this.updateUI();
         const eventData = this.eventSystem.generateEvent(this.state.depth);
         this.ui.updateEvent(eventData.icon, eventData.title, eventData.desc, eventData.choices);
     }
@@ -78,31 +127,38 @@ class GameController {
             if(this.state.hp < 0) this.state.hp = 0;
         }
         
-        this.ui.updateStats(this.state);
+        this.updateUI();
     }
 
     heal(amount) {
         this.state.hp += amount;
         if(this.state.hp > this.state.maxHp) this.state.hp = this.state.maxHp;
-        this.ui.updateStats(this.state);
+        this.updateUI();
     }
 
     takeRad(amount) {
+        if (this.buildSystem && this.buildSystem.hasActiveNote('spore_resistance')) {
+            amount = Math.ceil(amount / 2);
+            Logger.log("【孢子抗性】發揮作用，輻射傷害減半！", "positive");
+        }
         this.state.rad += amount;
         if(this.state.rad > 100) this.state.rad = 100;
-        this.ui.updateStats(this.state);
+        this.updateUI();
         Logger.log(`輻射值增加了 ${amount}。`, "system");
     }
 
     addArmor(amount) {
         this.state.armor += amount;
-        this.ui.updateStats(this.state);
+        this.updateUI();
         Logger.log(`獲得了 ${amount} 點護甲！(目前護甲: ${this.state.armor})`, "positive");
     }
 
     addScrap(amount) {
+        if (this.buildSystem && this.buildSystem.hasActiveNote('scrap_recycling')) {
+            amount = Math.floor(amount * 1.3);
+        }
         this.state.scrap += amount;
-        this.ui.updateStats(this.state);
+        this.updateUI();
     }
 
     die() {
@@ -112,10 +168,11 @@ class GameController {
         this.state.hp = this.state.maxHp;
         this.state.rad = 0;
         this.state.scrap = Math.floor(this.state.scrap * 0.5); // Lose half scrap
+        if (this.buildSystem) this.buildSystem.resetRunState();
         
         if (this.combatSystem) this.combatSystem.endCombat();
         
-        this.ui.updateStats(this.state);
+        this.updateUI();
 
         if (this.ui.showResultModal) {
             this.ui.showResultModal(
@@ -132,12 +189,42 @@ class GameController {
         }
     }
 
+    abandon() {
+        if (!this.state.inExpedition) return;
+        this.state.inExpedition = false;
+        this.state.inCombat = false;
+        Logger.log("你選擇了放棄，倉皇逃回了小屋...", "important");
+        this.state.hp = this.state.maxHp;
+        this.state.rad = 0;
+        this.state.scrap = Math.floor(this.state.scrap * 0.5); // Lose half scrap
+        if (this.buildSystem) this.buildSystem.resetRunState();
+        
+        if (this.combatSystem) this.combatSystem.endCombat();
+        
+        this.updateUI();
+
+        if (this.ui.showResultModal) {
+            this.ui.showResultModal(
+                "中途放棄",
+                "你感覺無法再繼續深入了。<br><br><span style='color:var(--accent-red); font-weight:bold;'>你選擇倉皇逃回小屋。</span><br><br>在逃跑的過程中，你遺失了一半的舊世幣。",
+                () => {
+                    this.ui.hideTopBar();
+                    this.ui.showHub();
+                }
+            );
+        } else {
+            this.ui.hideTopBar();
+            this.ui.showHub();
+        }
+    }
+
     winChapter() {
         this.state.inExpedition = false;
         this.state.hp = this.state.maxHp;
         this.state.rad = 0;
+        if (this.buildSystem) this.buildSystem.resetRunState();
         
-        this.ui.updateStats(this.state);
+        this.updateUI();
         this.ui.hideTopBar();
         this.ui.showHub();
     }

@@ -10,9 +10,44 @@ document.addEventListener('DOMContentLoaded', () => {
         game.startExpedition();
     });
 
-    document.getElementById('btn-upgrades').addEventListener('click', () => {
-        Logger.log("資源不足，無法升級。", "system");
-    });
+    const btnBookshelf = document.getElementById('btn-bookshelf');
+    if (btnBookshelf) {
+        btnBookshelf.addEventListener('click', () => {
+            ui.renderBookshelf();
+            ui.showBookshelf();
+        });
+    }
+
+    const btnSettings = document.getElementById('btn-settings-gear');
+    const settingsModal = document.getElementById('settings-modal');
+    const btnCloseSettings = document.getElementById('btn-close-settings');
+    const btnAbandon = document.getElementById('btn-abandon');
+
+    if (btnSettings) {
+        btnSettings.addEventListener('click', () => {
+            if (settingsModal) settingsModal.classList.remove('hidden');
+        });
+    }
+
+    if (btnCloseSettings) {
+        btnCloseSettings.addEventListener('click', () => {
+            if (settingsModal) settingsModal.classList.add('hidden');
+        });
+    }
+
+    if (btnAbandon) {
+        btnAbandon.addEventListener('click', () => {
+            if (settingsModal) settingsModal.classList.add('hidden');
+            game.abandon();
+        });
+    }
+
+    const btnCloseBookshelf = document.getElementById('btn-close-bookshelf');
+    if (btnCloseBookshelf) {
+        btnCloseBookshelf.addEventListener('click', () => {
+            ui.hideBookshelf();
+        });
+    }
 
     document.getElementById('btn-logs').addEventListener('click', () => {
         Logger.log("筆記上寫著：『不要相信螢光綠色的真菌。』", "important");

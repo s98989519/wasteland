@@ -11,40 +11,33 @@
     <!-- 遊戲主容器 -->
     <div id="game-container">
         
-        <!-- 頂部狀態列 -->
-        <header id="top-bar" class="hidden">
-            <div id="top-bar-left" class="stat-group">
-                <div class="stat-item">
-                    <span class="stat-label">HP</span>
-                    <div class="bar-container">
-                        <div id="hp-bar" class="bar hp-fill" style="width: 100%;"></div>
-                    </div>
-                    <span id="hp-text" class="stat-value">100/100</span>
-                </div>
-                <div class="stat-item" id="status-container" style="display: none;">
-                    <span class="stat-label">目前狀態</span>
-                    <div id="status-list" style="display: flex; gap: 5px; flex-wrap: wrap;">
-                    </div>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-label">輻射</span>
-                    <div class="bar-container">
-                        <div id="rad-bar" class="bar rad-fill" style="width: 0%;"></div>
-                    </div>
-                    <span id="rad-text" class="stat-value">0/100</span>
-                </div>
+        <!-- 頂部狀態列 (Compact) -->
+        <header id="top-bar" class="compact-top-bar hidden">
+            <div class="compact-stat">
+                <div class="compact-label">HP</div>
+                <div class="bar-container compact-bar-container"><div id="hp-bar" class="bar hp-fill" style="width: 100%;"></div></div>
+                <div id="hp-text" class="compact-value">100/100</div>
             </div>
-            <div class="stat-group right-align">
-                <div class="stat-item">
-                    <span class="stat-label">進度</span>
-                    <span id="depth-text" class="stat-value">0/35</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-label">舊世幣</span>
-                    <span id="scrap-text" class="stat-value">0</span>
-                </div>
+            <div class="compact-stat">
+                <div class="compact-label">輻射</div>
+                <div class="bar-container compact-bar-container"><div id="rad-bar" class="bar rad-fill" style="width: 0%;"></div></div>
+                <div id="rad-text" class="compact-value">0/100</div>
             </div>
+            <div class="compact-stat text-only">
+                <div class="compact-label">舊世幣</div>
+                <div id="scrap-text" class="compact-value">0</div>
+            </div>
+            <div class="compact-stat text-only">
+                <div class="compact-label">進度</div>
+                <div id="depth-text" class="compact-value">0/35</div>
+            </div>
+            <button id="btn-settings-gear" class="btn-gear">⚙️</button>
         </header>
+        
+        <!-- 狀態列 (Buffs) -->
+        <div id="status-container" style="display: none; padding: 5px 15px; background: rgba(0,0,0,0.5); border-bottom: 1px solid #333;">
+            <div id="status-list" style="display: flex; gap: 5px; flex-wrap: wrap;"></div>
+        </div>
 
         <button id="btn-toggle-topbar" class="hidden" style="position: absolute; top: 10px; right: 10px; background: rgba(20,20,20,0.8); border: 1px solid #555; border-radius: 5px; width: 32px; height: 32px; color: #fff; z-index: 100; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px;">⬇️</button>
 
@@ -58,7 +51,7 @@
                     <p class="story-text">這裡是獵人把你養大的地方，雖然殘破，但很安全。牆上還掛著他留下的舊步槍。</p>
                     <div class="action-grid">
                         <button id="btn-start-expedition" class="btn primary">出發尋找</button>
-                        <button id="btn-upgrades" class="btn secondary">檢視物資與升級</button>
+                        <button id="btn-bookshelf" class="btn secondary">老舊書架 (生存筆記)</button>
                         <button id="btn-logs" class="btn secondary">獵人筆記</button>
                     </div>
                 </div>
@@ -82,7 +75,7 @@
                     <div class="combat-left-col" style="display: flex; flex-direction: column;">
                         <div id="combat-log-anchor" style="width: 100%;"></div>
                         
-                        <div id="enemies-container" style="display: flex; gap: 15px; justify-content: center; flex-wrap: nowrap; width: 100%; min-height: 250px; margin-top: 15px;">
+                        <div id="enemies-container" style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap; width: 100%; min-height: 250px; margin-top: 15px;">
                             <!-- Enemy cards will be injected here -->
                         </div>
                     </div>
@@ -128,6 +121,20 @@
                 </div>
             </section>
         </main>
+
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="modal hidden">
+            <div class="glass-panel modal-content" style="width: 250px; max-width: 90%; padding: 20px;">
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <button class="btn secondary">未來的設定</button>
+                    <button class="btn secondary">未來的設定</button>
+                    <button class="btn secondary">未來的設定</button>
+                    <button class="btn secondary">未來的設定</button>
+                    <button id="btn-abandon" class="btn secondary" style="border-color: var(--accent-red); margin-top: 15px;">中途放棄，回到小屋</button>
+                </div>
+                <button id="btn-close-settings" class="btn secondary" style="margin-top: 15px; width: 100%;">關閉</button>
+            </div>
+        </div>
 
         <!-- 背包 Modal -->
         <div id="inventory-modal" class="modal hidden">
@@ -214,6 +221,21 @@
             </div>
         </div>
 
+        <!-- 老舊書架 Modal -->
+        <div id="bookshelf-modal" class="modal hidden" style="z-index: 1001;">
+            <div class="glass-panel modal-content" style="max-width: 600px; width: 95%;">
+                <h2 style="color: var(--text-primary); text-align: center; margin-bottom: 10px; letter-spacing: 2px;">老舊書架</h2>
+                <p style="color: #ccc; text-align: center; margin-bottom: 20px; font-size: 0.9rem;">出發前，挑選你領悟的生存守則。記憶槽位：<span id="memory-slots-text" style="color: var(--accent-orange); font-weight: bold;">0/2</span></p>
+                
+                <div class="inventory-divider">生存筆記圖鑑</div>
+                <div id="bookshelf-list" class="action-grid" style="max-height: 300px; overflow-y: auto; padding-right: 5px; gap: 10px;">
+                    <!-- Notes go here -->
+                </div>
+
+                <button id="btn-close-bookshelf" class="btn secondary" style="margin-top: 20px; width: 100%;">離開書架</button>
+            </div>
+        </div>
+
         <!-- 底部控制/日誌 -->
         <footer id="bottom-bar">
             <div id="log-container">
@@ -227,6 +249,8 @@
     <script src="js/systems/InventorySystem.js"></script>
     <script src="js/systems/EventSystem.js"></script>
     <script src="js/systems/CombatSystem.js"></script>
+    <script src="js/systems/BuildSystem.js"></script>
+    <script src="js/systems/SaveSystem.js"></script>
     <script src="js/ui/UIManager.js"></script>
     <script src="js/core/GameController.js"></script>
     <script src="js/main.js"></script>

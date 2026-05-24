@@ -33,6 +33,10 @@ class UIManager {
         // Inventory Elements
         this.inventoryModal = document.getElementById('inventory-modal');
         this.inventoryList = document.getElementById('inventory-list');
+        
+        // Bookshelf Elements
+        this.bookshelfModal = document.getElementById('bookshelf-modal');
+        this.bookshelfList = document.getElementById('bookshelf-list');
     }
 
     showHub() {
@@ -224,14 +228,19 @@ class UIManager {
             const card = document.createElement('div');
             card.id = `enemy-card-${enemy.id}`;
             card.className = 'content-box glass-panel enemy-card';
-            card.style.flex = '1';
-            card.style.minWidth = '0'; // Allow shrinking so they stay side by side
+            card.style.flex = '1 1 calc(50% - 15px)';
+            card.style.minWidth = '140px';
+            if (enemies.length === 1) {
+                card.style.maxWidth = '300px';
+            } else {
+                card.style.maxWidth = 'calc(50% - 7.5px)';
+            }
             card.style.position = 'relative';
             card.style.padding = cardPadding;
             card.style.display = 'flex';
             card.style.flexDirection = 'column';
             card.style.justifyContent = 'flex-start';
-            card.style.minHeight = '260px'; // Increase base height
+            card.style.minHeight = isCrowded ? '200px' : '260px'; // Make cards shorter if crowded
             card.style.cursor = turnState === 'SELECTING_TARGET' ? 'pointer' : 'default';
             if (turnState === 'SELECTING_TARGET') {
                 card.style.borderColor = 'var(--accent-orange)';
@@ -422,6 +431,97 @@ class UIManager {
 
     hideInventory() {
         this.inventoryModal.classList.add('hidden');
+    }
+
+    showBookshelf() {
+        if(this.bookshelfModal) this.bookshelfModal.classList.remove('hidden');
+    }
+
+    hideBookshelf() {
+        if(this.bookshelfModal) this.bookshelfModal.classList.add('hidden');
+    }
+
+    renderBookshelf(buildSystem) {
+        if (!buildSystem || !this.bookshelfList) return;
+
+        const memorySlotsText = document.getElementById('memory-slots-text');
+        if (memorySlotsText) {
+            memorySlotsText.innerText = `${buildSystem.equippedNotes.length}/${buildSystem.maxSlots}`;
+        }
+
+        this.bookshelfList.innerHTML = '';
+        const dict = buildSystem.noteDictionary;
+
+        for (const [id, note] of Object.entries(dict)) {
+            const itemDiv = document.createElement('div');
+            
+            if (!buildSystem.discoveredNotes.has(id)) {
+                // Not discovered
+                itemDiv.className = 'note-item';
+                itemDiv.style.opacity = '0.5';
+                itemDiv.innerHTML = `
+                    <div class="note-title" style="color: #666;">【 ??? 】</div>
+                    <div class="note-desc">尚未在荒野中發現此筆記的線索。</div>
+                `;
+            } else if (!buildSystem.craftedNotes.has(id)) {
+                // Discovered but not crafted
+                itemDiv.className = 'note-item';
+                let costTexts = [];
+                if (note.cost.scrap) costTexts.push(`${note.cost.scrap} 舊世幣`);
+                
+                for (let [matId, amt] of Object.entries(note.cost)) {
+                    if (matId === 'scrap') continue;
+                    let itemName = matId;
+                    if (matId === 'boar_pelt') itemName = '毛皮';
+                    if (matId === 'strange_spore') itemName = '奇異孢子';
+                    costTexts.push(`${amt}x ${itemName}`);
+                }
+                const canCraft = buildSystem.canCraft(id);
+                
+                itemDiv.innerHTML = `
+                    <div class="note-title">${note.name}</div>
+                    <div class="note-desc">${note.desc}</div>
+                    <div class="note-cost">裝訂需求：${costTexts.join(', ')}</div>
+                    <div class="note-actions">
+                        <button class="btn primary btn-craft" style="padding: 5px 15px; font-size: 0.9rem;">裝訂</button>
+                    </div>
+                `;
+                const btnCraft = itemDiv.querySelector('.btn-craft');
+                if (canCraft) {
+                    btnCraft.onclick = () => {
+                        if (buildSystem.craftNote(id)) {
+                            this.renderBookshelf(buildSystem);
+                        }
+                    };
+                } else {
+                    btnCraft.disabled = true;
+                    btnCraft.style.opacity = '0.5';
+                    btnCraft.style.cursor = 'not-allowed';
+                }
+            } else {
+                // Crafted
+                const isEquipped = buildSystem.equippedNotes.includes(id);
+                itemDiv.className = `note-item crafted ${isEquipped ? 'equipped' : ''}`;
+                itemDiv.innerHTML = `
+                    <div class="note-title">${note.name}</div>
+                    <div class="note-desc">${note.desc}</div>
+                    <div class="note-actions">
+                        <button class="btn secondary btn-equip" style="padding: 5px 15px; font-size: 0.9rem;">
+                            ${isEquipped ? '卸下' : '裝備'}
+                        </button>
+                    </div>
+                `;
+                itemDiv.querySelector('.btn-equip').onclick = () => {
+                    if (isEquipped) {
+                        buildSystem.unequipNote(id);
+                    } else {
+                        buildSystem.equipNote(id);
+                    }
+                    this.renderBookshelf(buildSystem);
+                };
+            }
+            this.bookshelfList.appendChild(itemDiv);
+        }
     }
 
     showResultModal(title, desc, confirmCb) {

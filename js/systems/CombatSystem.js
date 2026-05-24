@@ -48,6 +48,13 @@ class CombatSystem {
             }
         }
 
+        if (this.game.buildSystem && this.game.buildSystem.hasActiveNote('spore_resistance')) {
+            if (this.game.state.hp < this.game.state.maxHp) {
+                this.game.heal(1);
+                Logger.log("【孢子抗性】使你回復 1 點生命。", "positive");
+            }
+        }
+
         if (this.enemies.every(e => e.isDead)) {
             this.winCombat();
             return;
@@ -115,15 +122,17 @@ class CombatSystem {
 
     selectAction(actionType) {
         if (this.turnState === 'SELECTING_ACTION' || this.turnState === 'SELECTING_TARGET') {
+            const skill = this.getWeaponSkill();
+            
             this.selectedActionType = actionType;
             this.turnState = 'SELECTING_TARGET';
             
             let actionName = actionType;
             if (actionType === 'attack') actionName = "⚔️ 攻擊";
             else if (actionType === 'prepare') actionName = "⚡ 準備";
-            else if (actionType === 'skill') actionName = `💥 ${this.getWeaponSkill().name}`;
             else if (actionType === 'block') actionName = "🛡️ 防禦";
             else if (actionType === 'dodge') actionName = "💨 閃躲";
+            else if (actionType === 'skill') actionName = `💥 ${skill.name}`;
             
             Logger.log(`請點擊選擇 [${actionName}] 的目標...`, "system");
             this.updateUI();
@@ -152,24 +161,32 @@ class CombatSystem {
             if (currentAction && currentAction.type === 'skill') {
                 queuedSkills -= 1; // It will be replaced, so don't double count
             }
-            if (this.prepStacks < (queuedSkills + 1) * skill.cost) {
-                Logger.log(`${skill.name}發動失敗：準備層數不足！(需要 ${skill.cost} 層)`, "system");
+            
+            let queuedPreps = Object.values(this.playerQueuedActions).filter(a => a.type === 'prepare').length;
+            if (currentAction && currentAction.type === 'prepare') {
+                queuedPreps -= 1; 
+            }
+            const virtualPrepStacks = this.prepStacks + queuedPreps;
+            
+            if (virtualPrepStacks < (queuedSkills + 1) * skill.cost) {
+                Logger.log(`${skill.name}發動失敗：準備層數不足！(包含已分配的準備動作，共需要 ${skill.cost} 層)`, "system");
                 return;
             }
         }
 
         this.playerQueuedActions[enemyId] = { type: this.selectedActionType };
         
-        this.turnState = 'SELECTING_ACTION';
-        this.selectedActionType = null;
-        
-        this.updateUI();
-
         const aliveEnemies = this.enemies.filter(e => !e.isDead);
         const allQueued = aliveEnemies.every(e => this.playerQueuedActions[e.id] !== undefined);
         
         if (allQueued) {
+            this.turnState = 'SELECTING_ACTION';
+            this.selectedActionType = null;
+            this.updateUI();
             setTimeout(() => this.executeTurn(), 500);
+        } else {
+            Logger.log(`已鎖定目標，請繼續點擊其他敵人...`, "system");
+            this.updateUI();
         }
     }
 
@@ -229,6 +246,9 @@ class CombatSystem {
                     baseMinAtk = Math.max(1, baseMinAtk - 1);
                     baseMaxAtk = Math.max(1, baseMaxAtk - 1);
                 }
+                if (this.game.buildSystem && this.game.buildSystem.hasActiveNote('beast_instinct')) {
+                    baseMinAtk += 2; baseMaxAtk += 2;
+                }
                 const dmg = Math.floor(Math.random() * (baseMaxAtk - baseMinAtk + 1)) + baseMinAtk;
                 Logger.log(`你對 ${enemy.name} 發起攻擊，造成 ${dmg} 點傷害！`);
                 this.damageEnemy(enemy, dmg);
@@ -255,6 +275,9 @@ class CombatSystem {
                                 baseMinAtk = Math.max(1, baseMinAtk - 1);
                                 baseMaxAtk = Math.max(1, baseMaxAtk - 1);
                             }
+                            if (this.game.buildSystem && this.game.buildSystem.hasActiveNote('beast_instinct')) {
+                                baseMinAtk += 2; baseMaxAtk += 2;
+                            }
                             const baseDmg = Math.floor(Math.random() * (baseMaxAtk - baseMinAtk + 1)) + baseMinAtk;
                             const finalDmg = Math.floor(baseDmg * 1.3);
                             Logger.log(`${skill.name} 命中了 ${target.name}，造成 ${finalDmg} 點傷害！`);
@@ -271,6 +294,9 @@ class CombatSystem {
                         if (this.game.state.buffs && this.game.state.buffs.weaknessTurns > 0) {
                             baseMinAtk = Math.max(1, baseMinAtk - 1);
                             baseMaxAtk = Math.max(1, baseMaxAtk - 1);
+                        }
+                        if (this.game.buildSystem && this.game.buildSystem.hasActiveNote('beast_instinct')) {
+                            baseMinAtk += 2; baseMaxAtk += 2;
                         }
                         const multiplier = 1.2 + Math.random() * 0.4;
                         const baseDmg = Math.floor(Math.random() * (baseMaxAtk - baseMinAtk + 1)) + baseMinAtk;
@@ -377,8 +403,12 @@ class CombatSystem {
                 blockAmount = 5;
                 finalDmg = Math.max(0, finalDmg - blockAmount);
             } else if (defType === "dodge") {
-                const dodgeChance = Math.random();
-                if (dodgeChance <= 0.15) {
+                let dodgeChance = 0.15;
+                if (this.game.buildSystem && this.game.buildSystem.hasActiveNote('beast_instinct')) {
+                    dodgeChance += 0.05;
+                }
+                const roll = Math.random();
+                if (roll <= dodgeChance) {
                     dodgeAmount = finalDmg; // dodged all
                     finalDmg = 0;
                     dodgeStr = " <span style='color:var(--accent-green);'>(完美閃躲！)</span>";
@@ -453,6 +483,15 @@ class CombatSystem {
             enemy.hp = 0;
             enemy.isDead = true;
             Logger.log(`${enemy.name} 倒下了！`, "positive");
+
+            // Drop notes
+            if (this.game.buildSystem) {
+                if (enemy.type === 'boar' && Math.random() < 0.1) {
+                    this.game.buildSystem.discoverNote('beast_instinct');
+                } else if ((enemy.type === 'green_mushroom' || enemy.type === 'red_mushroom') && Math.random() < 0.1) {
+                    this.game.buildSystem.discoverNote('spore_resistance');
+                }
+            }
 
             // --- 死亡觸發效果 ---
             if (enemy.type === 'red_mushroom') {
@@ -587,9 +626,32 @@ class CombatSystem {
             if (this.turnState !== 'EXECUTING') {
                 const skill = this.getWeaponSkill();
                 let queuedSkills = Object.values(this.playerQueuedActions).filter(a => a.type === 'skill').length;
-                displayPrepStacks -= (queuedSkills * skill.cost);
+                let queuedPreps = Object.values(this.playerQueuedActions).filter(a => a.type === 'prepare').length;
+                displayPrepStacks = displayPrepStacks + queuedPreps - (queuedSkills * skill.cost);
             }
             this.game.ui.renderCombatState(this.enemies, displayPrepStacks, this.playerQueuedActions, this.turnState, this.selectedActionType);
         }
+    }
+
+    exportData() {
+        return {
+            enemies: this.enemies,
+            turn: this.turn,
+            combatLog: this.combatLog,
+            prepStacks: this.prepStacks,
+            playerQueuedActions: this.playerQueuedActions,
+            turnState: this.turnState,
+            selectedActionType: this.selectedActionType
+        };
+    }
+
+    importData(data) {
+        if (data.enemies) this.enemies = data.enemies;
+        if (data.turn !== undefined) this.turn = data.turn;
+        if (data.combatLog) this.combatLog = data.combatLog;
+        if (data.prepStacks !== undefined) this.prepStacks = data.prepStacks;
+        if (data.playerQueuedActions) this.playerQueuedActions = data.playerQueuedActions;
+        if (data.turnState) this.turnState = data.turnState;
+        if (data.selectedActionType) this.selectedActionType = data.selectedActionType;
     }
 }

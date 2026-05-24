@@ -98,13 +98,28 @@ class InventorySystem {
     }
 
     _refreshUI() {
-        this.game.ui.renderInventory(
-            this.equipment, 
-            this.items, 
-            (id) => this.useItem(id),
-            (id) => this.equipItem(id),
-            (slot) => this.unequipItem(slot)
-        );
+        if (this.game.ui && this.game.ui.renderInventory) {
+            this.game.ui.renderInventory(
+                this.equipment,
+                this.items,
+                (id) => this.useItem(id),
+                (id) => this.equipItem(id),
+                (slot) => this.unequipItem(slot)
+            );
+        }
+        if (this.game.saveSystem) this.game.saveSystem.save();
+    }
+
+    exportData() {
+        return {
+            items: this.items,
+            equipment: this.equipment
+        };
+    }
+
+    importData(data) {
+        if (data.items) this.items = data.items;
+        if (data.equipment) this.equipment = data.equipment;
     }
 
     addItem(itemId, name, type, stats, count = 1) {
