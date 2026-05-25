@@ -13,8 +13,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnBookshelf = document.getElementById('btn-bookshelf');
     if (btnBookshelf) {
         btnBookshelf.addEventListener('click', () => {
-            ui.renderBookshelf();
-            ui.showBookshelf();
+            if (game.buildSystem) {
+                ui.renderBookshelf(game.buildSystem);
+                ui.showBookshelf();
+            }
+        });
+    }
+
+    const btnTopbarBag = document.getElementById('btn-topbar-bag');
+    if (btnTopbarBag) {
+        btnTopbarBag.addEventListener('click', () => {
+            if(game.inventorySystem) {
+                game.inventorySystem._refreshUI();
+            }
+            ui.showInventory();
         });
     }
 
@@ -49,6 +61,44 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    const btnCloseCampNotes = document.getElementById('btn-close-camp-notes');
+    if (btnCloseCampNotes) {
+        btnCloseCampNotes.addEventListener('click', () => {
+            ui.hideCampNotes();
+        });
+    }
+
+    document.addEventListener('note-equip', (e) => {
+        if(game.buildSystem) {
+            game.buildSystem.equipNote(e.detail);
+            ui.renderBookshelf(game.buildSystem);
+        }
+    });
+
+    document.addEventListener('note-unequip', (e) => {
+        if(game.buildSystem) {
+            game.buildSystem.unequipNote(e.detail);
+            ui.renderBookshelf(game.buildSystem);
+        }
+    });
+
+    // Camp Notes Custom Events
+    document.addEventListener('camp-note-equip', (e) => {
+        if(game.buildSystem) {
+            game.buildSystem.equipNote(e.detail);
+            ui.renderCampNotes(game.buildSystem);
+            ui.updateStats(game.state); // Make sure stats update immediately
+        }
+    });
+
+    document.addEventListener('camp-note-unequip', (e) => {
+        if(game.buildSystem) {
+            game.buildSystem.unequipNote(e.detail);
+            ui.renderCampNotes(game.buildSystem);
+            ui.updateStats(game.state); // Make sure stats update immediately
+        }
+    });
+
     document.getElementById('btn-logs').addEventListener('click', () => {
         Logger.log("筆記上寫著：『不要相信螢光綠色的真菌。』", "important");
     });
@@ -73,11 +123,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Combat Defend Menu
     document.getElementById('btn-block').addEventListener('click', () => {
         if(game.combatSystem) game.combatSystem.selectAction('block');
-        ui.showCombatMenu('main');
     });
     document.getElementById('btn-dodge').addEventListener('click', () => {
         if(game.combatSystem) game.combatSystem.selectAction('dodge');
-        ui.showCombatMenu('main');
     });
     document.getElementById('btn-back-defend').addEventListener('click', () => {
         if(game.combatSystem) game.combatSystem.cancelActionSelection();
@@ -87,15 +135,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // Combat Skill Menu
     document.getElementById('btn-prepare').addEventListener('click', () => {
         if(game.combatSystem) game.combatSystem.selectAction('prepare');
-        ui.showCombatMenu('main');
     });
     document.getElementById('btn-skill').addEventListener('click', () => {
         if(game.combatSystem) game.combatSystem.selectAction('skill');
-        ui.showCombatMenu('main');
     });
     document.getElementById('btn-back-skill').addEventListener('click', () => {
         if(game.combatSystem) game.combatSystem.cancelActionSelection();
         ui.showCombatMenu('main');
+    });
+
+    // AP Controls
+    document.getElementById('btn-undo-action').addEventListener('click', () => {
+        if(game.combatSystem) game.combatSystem.undoLastAction();
+    });
+    document.getElementById('btn-end-turn').addEventListener('click', () => {
+        if(game.combatSystem) game.combatSystem.endTurnQueue();
     });
 
     // Inventory Modal Close

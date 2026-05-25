@@ -78,6 +78,7 @@ class GameController {
     startExpedition() {
         this.state.inExpedition = true;
         this.state.depth = 1;
+        if (this.buildSystem) this.buildSystem.startRun();
         Logger.log("你推開沉重的鐵門，踏入了未知的荒野...", "important");
         
         this.ui.showExpedition();
@@ -105,6 +106,19 @@ class GameController {
         }
 
         this.state.depth++;
+        
+        // 重度輻射 (60~89 Rad): 每走 1 步扣 1 點 HP
+        if (this.state.rad >= 60) {
+            this.state.hp -= 1;
+            Logger.log("【重度輻射】細胞病變導致你失去 1 點生命。", "negative");
+            if (this.state.hp <= 0) {
+                this.state.hp = 0;
+                this.die("輻射致死", "你受到過多輻射，細胞不斷崩潰，<br><br><span style='color:var(--accent-red); font-weight:bold;'>你撐不住倒在了荒野中...</span><br><br>當你再次醒來時，發現自己已經回到了獵人小屋，但身上的一部分物資遺失了。");
+                return;
+            }
+            this.updateUI();
+        }
+
         this.triggerCurrentEvent();
     }
 
@@ -131,6 +145,13 @@ class GameController {
     }
 
     heal(amount) {
+        // 輕度輻射 (30~59 Rad): 所有回血行為效果降低 30%
+        if (this.state.rad >= 30) {
+            const originalAmount = amount;
+            amount = Math.ceil(amount * 0.7);
+            Logger.log(`【輕度輻射】身體排斥反應導致回復效果降低 (原本 ${originalAmount} -> 實際 ${amount})`, "system");
+        }
+        
         this.state.hp += amount;
         if(this.state.hp > this.state.maxHp) this.state.hp = this.state.maxHp;
         this.updateUI();
@@ -142,9 +163,15 @@ class GameController {
             Logger.log("【孢子抗性】發揮作用，輻射傷害減半！", "positive");
         }
         this.state.rad += amount;
-        if(this.state.rad > 100) this.state.rad = 100;
-        this.updateUI();
         Logger.log(`輻射值增加了 ${amount}。`, "system");
+        
+        if (this.state.rad >= 100) {
+            this.state.rad = 100;
+            this.updateUI();
+            this.die("基因崩潰", "你的身體無法承受高達 100 點的輻射，<br><br><span style='color:var(--accent-red); font-weight:bold;'>你的基因開始崩潰，肉體逐漸溶解...</span><br><br>當你再次醒來時，發現自己已經回到了獵人小屋，但身上的一部分物資遺失了。");
+            return;
+        }
+        this.updateUI();
     }
 
     addArmor(amount) {
@@ -161,10 +188,10 @@ class GameController {
         this.updateUI();
     }
 
-    die() {
+    die(title = "失去意識", desc = "你受到過多的傷害，<br><br><span style='color:var(--accent-red); font-weight:bold;'>你眼前一黑，暈了過去...</span><br><br>當你再次醒來時，發現自己已經回到了獵人小屋，但身上的一部分物資遺失了。") {
         this.state.inExpedition = false;
         this.state.inCombat = false;
-        Logger.log("你眼前一黑，暈了過去...失去了一部分物資回到獵人小屋。", "important");
+        
         this.state.hp = this.state.maxHp;
         this.state.rad = 0;
         this.state.scrap = Math.floor(this.state.scrap * 0.5); // Lose half scrap
@@ -176,8 +203,8 @@ class GameController {
 
         if (this.ui.showResultModal) {
             this.ui.showResultModal(
-                "失去意識",
-                "你受到過多的傷害，<br><br><span style='color:var(--accent-red); font-weight:bold;'>你眼前一黑，暈了過去...</span><br><br>當你再次醒來時，發現自己已經回到了獵人小屋，但身上的一部分物資遺失了。",
+                title,
+                desc,
                 () => {
                     this.ui.hideTopBar();
                     this.ui.showHub();

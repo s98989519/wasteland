@@ -27,16 +27,23 @@ class BuildSystem {
 
         // Persistent State across runs
         this.discoveredNotes = new Set(); // IDs of notes discovered ever (unlocks in gallery)
-        this.craftedNotes = new Set();    // IDs of notes crafted (available to equip)
+        this.craftedNotes = new Map();    // IDs of notes crafted to their counts
         
-        // Preparation State (set in Hub)
+        // Preparation State (set in Hub or Camp)
         this.equippedNotes = [];          // IDs of notes currently equipped in slots (max 2)
+        
+        // Run specific state
+        this.startingEquippedNotes = [];  // Notes equipped at the start of the current run
+        this.runDiscoveredNotes = new Set(); // Notes discovered in the current run
+    }
 
-        // Run State (resets on death/win)
-        this.runDiscoveredNotes = new Set(); // Notes discovered in CURRENT run (active immediately)
+    startRun() {
+        this.startingEquippedNotes = [...this.equippedNotes];
+        this.runDiscoveredNotes.clear();
     }
 
     resetRunState() {
+        this.startingEquippedNotes = [];
         this.runDiscoveredNotes.clear();
     }
 
@@ -50,26 +57,22 @@ class BuildSystem {
             isNewDiscovery = true;
         }
 
-        if (!this.runDiscoveredNotes.has(id) && !this.equippedNotes.includes(id)) {
-            this.runDiscoveredNotes.add(id);
-            Logger.log(`你領悟了新的生存守則：${this.noteDictionary[id].name}！本局已立即生效。`, "important");
-            if (this.game.ui && this.game.ui.showResultModal) {
-                this.game.ui.showResultModal("領悟生存筆記", `你領悟了 ${this.noteDictionary[id].name}。<br><br><span style="color:#ccc;">${this.noteDictionary[id].desc}</span><br><br><span style="color:var(--accent-orange);">本局已立即生效。回小屋後可消耗資源將其裝訂成實體筆記，以便未來開局裝備。</span>`);
-            }
-        }
+        // Add to craftedNotes directly so it can be equipped in Camp without cost
+        const currentCount = this.craftedNotes.get(id) || 0;
+        this.craftedNotes.set(id, currentCount + 1);
+        
+        // Mark as discovered in this run
+        this.runDiscoveredNotes.add(id);
     }
 
-    // Get notes that are active right now (equipped + discovered in this run)
+    // Get notes that are active right now (equipped)
     getActiveNotes() {
         const active = new Set(this.equippedNotes);
-        for (let noteId of this.runDiscoveredNotes) {
-            active.add(noteId);
-        }
         return Array.from(active).map(id => this.noteDictionary[id]);
     }
 
     hasActiveNote(id) {
-        return this.equippedNotes.includes(id) || this.runDiscoveredNotes.has(id);
+        return this.equippedNotes.includes(id);
     }
 
     canCraft(id) {
@@ -113,14 +116,16 @@ class BuildSystem {
             }
         }
 
-        this.craftedNotes.add(id);
+        // Mark as crafted
+        const currentCount = this.craftedNotes.get(id) || 0;
+        this.craftedNotes.set(id, currentCount + 1);
         if (this.game.updateUI) this.game.updateUI(); // update scrap UI and save
         Logger.log(`成功裝訂了實體筆記：${note.name}。`, "positive");
         return true;
     }
 
     equipNote(id) {
-        if (!this.craftedNotes.has(id)) return false;
+        if (!this.craftedNotes.has(id) || this.craftedNotes.get(id) <= 0) return false;
         if (this.equippedNotes.includes(id)) return false;
         
         if (this.equippedNotes.length >= this.maxSlots) {
@@ -146,16 +151,34 @@ class BuildSystem {
     exportData() {
         return {
             discoveredNotes: Array.from(this.discoveredNotes),
-            craftedNotes: Array.from(this.craftedNotes),
+            craftedNotes: Array.from(this.craftedNotes.entries()),
             equippedNotes: this.equippedNotes,
+            startingEquippedNotes: this.startingEquippedNotes,
             runDiscoveredNotes: Array.from(this.runDiscoveredNotes)
         };
     }
 
     importData(data) {
         if (data.discoveredNotes) this.discoveredNotes = new Set(data.discoveredNotes);
-        if (data.craftedNotes) this.craftedNotes = new Set(data.craftedNotes);
+        if (data.craftedNotes) {
+            if (Array.isArray(data.craftedNotes)) {
+                if (data.craftedNotes.length > 0 && Array.isArray(data.craftedNotes[0])) {
+                    this.craftedNotes = new Map(data.craftedNotes);
+                } else {
+                    this.craftedNotes = new Map();
+                    data.craftedNotes.forEach(id => this.craftedNotes.set(id, 1));
+                }
+            }
+        }
         if (data.equippedNotes) this.equippedNotes = data.equippedNotes;
+        
+        if (data.startingEquippedNotes) {
+            this.startingEquippedNotes = data.startingEquippedNotes;
+        } else if (this.equippedNotes && this.equippedNotes.length > 0) {
+            // Backward compatibility for old saves
+            this.startingEquippedNotes = [...this.equippedNotes];
+        }
+        
         if (data.runDiscoveredNotes) this.runDiscoveredNotes = new Set(data.runDiscoveredNotes);
     }
 }

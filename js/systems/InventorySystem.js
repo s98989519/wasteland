@@ -18,6 +18,8 @@ class InventorySystem {
         
         this.itemsUsedThisTurn = 0;
         this.maxItemsPerTurn = 1;
+        
+        this.campConsumablesUsed = []; // Array of used item IDs in the current camp
     }
 
     resetTurnUsage() {
@@ -27,9 +29,25 @@ class InventorySystem {
     useItem(itemId) {
         const item = this.items.find(i => i.id === itemId);
         if (item && item.count > 0 && (item.type === 'consumable' || item.type === 'material')) {
-            if (this.game.state.inCombat && this.itemsUsedThisTurn >= this.maxItemsPerTurn) {
-                Logger.log("本回合無法再使用更多道具！", "system");
-                return;
+            if (this.game.state.inCombat) {
+                if (this.itemsUsedThisTurn >= this.maxItemsPerTurn) {
+                    Logger.log("本回合無法再使用更多道具！", "system");
+                    return;
+                }
+            } else {
+                // Out of combat checks
+                const isCamp = this.game.state.depth > 0 && this.game.state.depth % 10 === 0 && this.game.state.depth !== 50;
+                const isHub = this.game.state.depth === 0;
+                
+                if (!isCamp && !isHub) {
+                    Logger.log("一般探索中無法使用消耗品！只能在營地或安全屋使用。", "system");
+                    return;
+                }
+                
+                if (this.campConsumablesUsed.includes(itemId)) {
+                    Logger.log("同一種消耗品在一次休息中只能使用一次！", "system");
+                    return;
+                }
             }
 
             let used = false;
@@ -58,6 +76,8 @@ class InventorySystem {
             
             if (this.game.state.inCombat) {
                 this.itemsUsedThisTurn++;
+            } else {
+                this.campConsumablesUsed.push(itemId);
             }
             
             this.game.ui.updateStats(this.game.state);
@@ -113,13 +133,15 @@ class InventorySystem {
     exportData() {
         return {
             items: this.items,
-            equipment: this.equipment
+            equipment: this.equipment,
+            campConsumablesUsed: this.campConsumablesUsed
         };
     }
 
     importData(data) {
         if (data.items) this.items = data.items;
         if (data.equipment) this.equipment = data.equipment;
+        if (data.campConsumablesUsed) this.campConsumablesUsed = data.campConsumablesUsed;
     }
 
     addItem(itemId, name, type, stats, count = 1) {

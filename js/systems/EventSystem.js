@@ -10,6 +10,9 @@ class EventSystem {
         if (this.lastStep !== step) {
             this.restState = { rested: false, built: false };
             this.lastStep = step;
+            if (this.game.inventorySystem) {
+                this.game.inventorySystem.campConsumablesUsed = [];
+            }
         }
 
         // 每 10 步觸發休息事件
@@ -65,11 +68,13 @@ class EventSystem {
         }
 
         choices.push({
-            text: "研讀舊筆記 (Build 選擇)",
+            text: "研讀舊筆記 (更換 Build)",
             keepUI: true,
             action: () => {
-                Logger.log("你翻閱著撿到的筆記，似乎領悟了什麼...(Build系統尚未實作)", "system");
-                // Future build logic
+                if (this.game.ui && this.game.buildSystem) {
+                    this.game.ui.renderCampNotes(this.game.buildSystem);
+                    this.game.ui.showCampNotes();
+                }
             }
         });
 

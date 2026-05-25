@@ -31,6 +31,7 @@
                 <div class="compact-label">進度</div>
                 <div id="depth-text" class="compact-value">0/35</div>
             </div>
+            <button id="btn-topbar-bag" class="btn-gear" style="font-size: 1.2rem; padding: 4px;">🎒</button>
             <button id="btn-settings-gear" class="btn-gear">⚙️</button>
         </header>
         
@@ -101,22 +102,34 @@
                     </div>
 
                     <div id="combat-main-actions" class="action-grid">
-                        <button id="btn-attack" class="btn primary">⚔️ 攻擊</button>
+                        <button id="btn-attack" class="btn primary">⚔️ 攻擊 (1 AP)</button>
                         <button id="btn-prepare-menu" class="btn secondary">⚡ 準備 / 技能 (<span id="prep-stacks">0</span>)</button>
                         <button id="btn-defend-menu" class="btn secondary">🛡️ 防衛動作</button>
                         <button id="btn-open-bag" class="btn secondary">🎒 背包</button>
                     </div>
 
                     <div id="combat-defend-actions" class="action-grid hidden">
-                        <button id="btn-block" class="btn primary">🛡️ 防禦 (穩定減傷)</button>
-                        <button id="btn-dodge" class="btn primary">💨 閃躲 (15%機率大減傷)</button>
+                        <button id="btn-block" class="btn primary">🛡️ 防禦 (1 AP)</button>
+                        <button id="btn-dodge" class="btn primary">💨 主動翻滾 (2 AP)</button>
                         <button id="btn-back-defend" class="btn secondary">返回</button>
                     </div>
 
                     <div id="combat-skill-actions" class="action-grid hidden">
-                        <button id="btn-prepare" class="btn primary">積累準備 (+1 層)</button>
+                        <button id="btn-prepare" class="btn primary">⚡ 準備 (1 AP)</button>
                         <button id="btn-skill" class="btn primary">重擊 (消耗 3 層)</button>
                         <button id="btn-back-skill" class="btn secondary">返回</button>
+                    </div>
+
+                    <!-- AP 狀態與排程控制 -->
+                    <div id="combat-ap-controls" style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px; padding: 10px; background: rgba(0,0,0,0.4); border: 1px solid #444; border-radius: 8px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="font-size: 1.1rem; color: var(--accent-orange); font-weight: bold;">⚡ AP: <span id="ap-text">3/3</span></span>
+                            <div id="ap-pip-container" style="display: flex; gap: 5px;"></div>
+                        </div>
+                        <div style="display: flex; gap: 10px;">
+                            <button id="btn-undo-action" class="btn secondary" style="padding: 5px 10px; font-size: 0.9rem;">↩️ 復原上一步</button>
+                            <button id="btn-end-turn" class="btn primary" style="padding: 5px 15px; font-size: 0.9rem; border-color: var(--accent-orange);">執行排程</button>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -184,7 +197,7 @@
                         <h3 style="color: var(--accent-orange); margin-bottom: 10px; font-size: 1rem; text-align: center;">數值面板</h3>
                         <div class="stat-line"><span>攻擊力</span> <span id="stat-atk">8~12</span></div>
                         <div class="stat-line"><span>防禦力</span> <span id="stat-def">0</span></div>
-                        <div class="stat-line"><span>閃躲率</span> <span id="stat-dodge">15%</span></div>
+                        <div class="stat-line"><span>閃躲率</span> <span id="stat-dodge">10%</span></div>
                         <div class="stat-line"><span>生命上限</span> <span id="stat-maxhp">100</span></div>
                     </div>
                 </div>
@@ -233,6 +246,21 @@
                 </div>
 
                 <button id="btn-close-bookshelf" class="btn secondary" style="margin-top: 20px; width: 100%;">離開書架</button>
+            </div>
+        </div>
+
+        <!-- 營地筆記 Modal -->
+        <div id="camp-notes-modal" class="modal hidden" style="z-index: 1001;">
+            <div class="glass-panel modal-content" style="max-width: 600px; width: 95%;">
+                <h2 style="color: var(--accent-green); text-align: center; margin-bottom: 10px; letter-spacing: 2px;">研讀筆記</h2>
+                <p style="color: #ccc; text-align: center; margin-bottom: 20px; font-size: 0.9rem;">你可以在此更換本局出發時帶的筆記，或是剛領悟的新筆記。記憶槽位：<span id="camp-memory-slots-text" style="color: var(--accent-orange); font-weight: bold;">0/2</span></p>
+                
+                <div class="inventory-divider">可更換的筆記</div>
+                <div id="camp-notes-list" class="action-grid" style="max-height: 300px; overflow-y: auto; padding-right: 5px; gap: 10px;">
+                    <!-- Notes go here -->
+                </div>
+
+                <button id="btn-close-camp-notes" class="btn secondary" style="margin-top: 20px; width: 100%;">收起筆記</button>
             </div>
         </div>
 

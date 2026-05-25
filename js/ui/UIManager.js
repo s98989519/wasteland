@@ -37,6 +37,10 @@ class UIManager {
         // Bookshelf Elements
         this.bookshelfModal = document.getElementById('bookshelf-modal');
         this.bookshelfList = document.getElementById('bookshelf-list');
+        
+        // Camp Notes Elements
+        this.campNotesModal = document.getElementById('camp-notes-modal');
+        this.campNotesList = document.getElementById('camp-notes-list');
     }
 
     showHub() {
@@ -80,39 +84,81 @@ class UIManager {
         statusList.innerHTML = '';
         if (combatStatusList) combatStatusList.innerHTML = '';
 
-        let hasBuff = false;
+        let activeBuffs = [];
 
-        const addBadge = (text, type, detailsHtml) => {
-            hasBuff = true;
+        if (state.armor && state.armor > 0) {
+            activeBuffs.push({ text: `🛡️ 護甲 (${state.armor})`, type: 'buff', details: `護甲可以抵擋受到的傷害。<br><br>目前擁有 <b>${state.armor}</b> 點護甲。` });
+        }
+        if (state.buffs && state.buffs.weaknessTurns > 0) {
+            activeBuffs.push({ text: `⚠️ 虛弱 (${state.buffs.weaknessTurns}回合)`, type: 'debuff', details: `你感到渾身無力，攻擊力與防禦力下降。<br><br>剩餘回合：<b>${state.buffs.weaknessTurns}</b>` });
+        }
+        if (state.buffs && state.buffs.prepStacks > 0) {
+            activeBuffs.push({ text: `⚡ 準備 (${state.buffs.prepStacks}層)`, type: 'buff', details: `蓄勢待發，可用來施放強大的武器技能。<br><br>目前層數：<b>${state.buffs.prepStacks}</b>` });
+        }
+
+        // 輻射狀態徽章
+        if (state.rad >= 90) {
+            activeBuffs.push({ text: `☢️ 輻射中毒`, type: 'debuff', details: `身體劇痛無法集中精神。<br><br><span style="color:var(--accent-red);">戰鬥中無法使用「準備」指令。</span><br>每走 1 步失去 1 點生命。<br>戰鬥開場附加 2 回合虛弱。` });
+        } else if (state.rad >= 60) {
+            activeBuffs.push({ text: `☢️ 重度輻射`, type: 'debuff', details: `細胞發生病變。<br><br><span style="color:var(--accent-orange);">每走 1 步失去 1 點生命。<br>戰鬥開場附加 2 回合虛弱。</span>` });
+        } else if (state.rad >= 30) {
+            activeBuffs.push({ text: `☢️ 輕度輻射`, type: 'debuff', details: `身體開始排斥食物。<br><br><span style="color:var(--accent-orange);">所有恢復效果降低 30%。</span>` });
+        }
+
+        const maxDisplay = 2;
+        const displayBuffs = activeBuffs.slice(0, maxDisplay);
+
+        const openStatusModal = (e) => {
+            e.stopPropagation();
+            if (activeBuffs.length === 0) return;
+            let fullHtml = '<div style="display:flex; flex-direction:column; gap:12px; width:100%; text-align:left; white-space: normal;">';
+            activeBuffs.forEach(b => {
+                const parts = b.details.split('<br><br>');
+                const shortDesc = parts[0] || '';
+                const effects = parts[1] || '';
+                const color = b.type === 'buff' ? 'var(--accent-green)' : 'var(--accent-red)';
+                
+                fullHtml += `<div style="padding:15px; border:1px solid #333; border-left:4px solid ${color}; border-radius:6px; background:rgba(20,20,20,0.8); width:100%; box-sizing:border-box;">
+                                <div style="display:flex; align-items: baseline; gap: 15px; margin-bottom: 12px;">
+                                    <div style="font-weight:bold; font-size: 1.1rem; color:#fff;">${b.text}</div>
+                                    <div style="font-size:0.85rem; color:#aaa;">${shortDesc}</div>
+                                </div>
+                                <div style="font-size:0.95rem; color:#ccc; line-height:1.6;">${effects}</div>
+                             </div>`;
+            });
+            fullHtml += '</div>';
+            if (this.showResultModal) this.showResultModal("當前狀態 (Status)", fullHtml);
+        };
+
+        displayBuffs.forEach(b => {
             const badge = document.createElement('span');
-            badge.className = `status-badge ${type}`;
-            badge.innerText = text;
-            badge.onclick = (e) => {
-                e.stopPropagation();
-                if (this.showResultModal) {
-                    this.showResultModal("狀態詳細資訊", detailsHtml);
-                }
-            };
+            badge.className = `status-badge ${b.type}`;
+            badge.innerText = b.text;
+            badge.onclick = openStatusModal;
             statusList.appendChild(badge);
             
             if (combatStatusList) {
                 const cb = badge.cloneNode(true);
-                cb.onclick = badge.onclick;
+                cb.onclick = openStatusModal;
                 combatStatusList.appendChild(cb);
             }
-        };
+        });
 
-        if (state.armor && state.armor > 0) {
-            addBadge(`🛡️ 護甲 (${state.armor})`, 'buff', `護甲可以抵擋受到的傷害。<br><br>目前擁有 <b>${state.armor}</b> 點護甲。`);
-        }
-        if (state.buffs && state.buffs.weaknessTurns > 0) {
-            addBadge(`⚠️ 虛弱 (${state.buffs.weaknessTurns}回合)`, 'debuff', `你感到渾身無力，攻擊力與防禦力下降。<br><br>剩餘回合：<b>${state.buffs.weaknessTurns}</b>`);
-        }
-        if (state.buffs && state.buffs.prepStacks > 0) {
-            addBadge(`⚡ 準備 (${state.buffs.prepStacks}層)`, 'buff', `蓄勢待發，可用來施放強大的武器技能。<br><br>目前層數：<b>${state.buffs.prepStacks}</b>`);
+        if (activeBuffs.length > maxDisplay) {
+            const moreBadge = document.createElement('span');
+            moreBadge.className = `status-badge`;
+            moreBadge.innerText = `+${activeBuffs.length - maxDisplay}`;
+            moreBadge.onclick = openStatusModal;
+            moreBadge.style.cursor = 'pointer';
+            statusList.appendChild(moreBadge);
+            if (combatStatusList) {
+                const cm = moreBadge.cloneNode(true);
+                cm.onclick = openStatusModal;
+                combatStatusList.appendChild(cm);
+            }
         }
 
-        if (hasBuff) {
+        if (activeBuffs.length > 0) {
             document.getElementById('status-container').style.display = 'block';
         } else {
             document.getElementById('status-container').style.display = 'none';
@@ -208,11 +254,23 @@ class UIManager {
         }
     }
 
-    renderCombatState(enemies, prepStacks, queuedActions, turnState, selectedActionType) {
+    renderCombatState(enemies, prepStacks, queuedActions, turnState, selectedActionType, ap = 3, maxAp = 3) {
         this.updatePrepStacks(prepStacks);
 
         const container = document.getElementById('enemies-container');
         if (!container) return;
+
+        // AP update
+        const apText = document.getElementById('ap-text');
+        if (apText) apText.innerText = `${ap}/${maxAp}`;
+        
+        const apPips = document.getElementById('ap-pip-container');
+        if (apPips) {
+            apPips.innerHTML = '';
+            for(let i=0; i<maxAp; i++) {
+                apPips.innerHTML += `<div style="width: 12px; height: 12px; border-radius: 50%; background: ${i < ap ? 'var(--accent-orange)' : '#444'}; border: 1px solid #222;"></div>`;
+            }
+        }
 
         const isCrowded = enemies.length > 2;
         const titleSize = isCrowded ? '1.1rem' : '1.3rem';
@@ -222,6 +280,7 @@ class UIManager {
         const cardPadding = isCrowded ? '10px' : '20px';
 
         container.innerHTML = '';
+
         enemies.forEach(enemy => {
             if (enemy.isDead) return;
 
@@ -256,17 +315,19 @@ class UIManager {
                 }
             };
 
-            const action = queuedActions[enemy.id];
+            const enemyActions = queuedActions.filter(a => a.targetId === enemy.id);
             let actionHtml = '';
-            if (action) {
-                let icon = '';
-                if (action.type === 'attack') icon = '⚔️';
-                else if (action.type === 'prepare') icon = '⚡';
-                else if (action.type === 'skill') icon = '💥';
-                else if (action.type === 'block') icon = '🛡️';
-                else if (action.type === 'dodge') icon = '💨';
-                
-                actionHtml = `<div style="position: absolute; top: -10px; right: -10px; background: var(--accent-orange); border-radius: 50%; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; z-index: 10;">${icon}</div>`;
+            if (enemyActions.length > 0) {
+                let iconsHtml = enemyActions.map((a, idx) => {
+                    let icon = '';
+                    if (a.type === 'attack') icon = '⚔️';
+                    else if (a.type === 'prepare') icon = '⚡';
+                    else if (a.type === 'skill') icon = '💥';
+                    else if (a.type === 'block') icon = '🛡️';
+                    else if (a.type === 'dodge') icon = '💨';
+                    return `<div style="position: absolute; top: -10px; right: ${-10 + idx * 25}px; background: var(--accent-orange); border-radius: 50%; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; z-index: ${10 - idx}; border: 2px solid #222;">${icon}</div>`;
+                }).join('');
+                actionHtml = iconsHtml;
             }
 
             const nextAction = enemy.nextAction;
@@ -274,21 +335,21 @@ class UIManager {
             let intentText = '無';
             if (nextAction) {
                 if (nextAction.type === 'attack') {
-                    intentText = `攻擊 (預計 ${nextAction.dmg} 傷害)`;
+                    intentText = `凶狠的眼神`;
                 } else if (nextAction.type === 'charge') {
-                    intentText = `<span style="color:var(--accent-red);font-weight:bold;">衝撞 (預計 ${nextAction.dmg} 傷害)</span>`;
+                    intentText = `<span style="color:var(--accent-red);font-weight:bold;">蓄力中</span>`;
                 } else if (nextAction.type === 'prepare') {
-                    intentText = '準備衝撞';
+                    intentText = '前腳刨地';
                 } else if (nextAction.type === 'mud') {
-                    intentText = '裹上泥巴';
+                    intentText = '在泥濘中打滾';
                 } else if (nextAction.type === 'stunned') {
                     intentText = '暈眩中';
                 } else if (nextAction.type === 'heal_spore') {
-                    intentText = '<span style="color:var(--accent-green);">治療孢子</span>';
+                    intentText = '<span style="color:var(--accent-green);">散發治癒氣息</span>';
                 } else if (nextAction.type === 'frenzy_spore') {
-                    intentText = '<span style="color:var(--accent-red);">狂暴孢子</span>';
+                    intentText = '<span style="color:var(--accent-red);">散發危險氣息</span>';
                 } else if (nextAction.type === 'burrow') {
-                    intentText = '<span style="color:var(--accent-orange);">縮地 (閃避)</span>';
+                    intentText = '<span style="color:var(--accent-orange);">準備鑽地</span>';
                 }
             }
 
@@ -301,7 +362,6 @@ class UIManager {
                 displayIcon = '🍄';
             }
 
-            // Adjust title size to be slightly smaller
             let adjustedTitleSize = enemies.length > 2 ? '0.85rem' : '0.95rem';
 
             card.innerHTML = `
@@ -381,12 +441,16 @@ class UIManager {
         const mainBtns = document.querySelectorAll('#combat-main-actions .btn');
         const defBtns = document.querySelectorAll('#combat-defend-actions .btn');
         const skillBtns = document.querySelectorAll('#combat-skill-actions .btn');
+        const btnUndo = document.getElementById('btn-undo-action');
+        const btnEndTurn = document.getElementById('btn-end-turn');
         
         // Update skill button text dynamically based on equipped weapon
         const btnSkill = document.getElementById('btn-skill');
+        let skillCost = 0;
         if (btnSkill && this.game && this.game.combatSystem) {
             const skill = this.game.combatSystem.getWeaponSkill();
-            btnSkill.innerText = `${skill.name} (消耗 ${skill.cost} 層)`;
+            skillCost = skill.cost;
+            btnSkill.innerText = `${skill.name} (消耗 1 AP + ${skill.cost} 層)`;
         }
 
         const disableBtns = (btns, disabled) => btns.forEach(b => {
@@ -401,10 +465,45 @@ class UIManager {
             disableBtns(mainBtns, true);
             disableBtns(defBtns, true);
             disableBtns(skillBtns, true);
+            if(btnUndo) { btnUndo.disabled = true; btnUndo.style.opacity = '0.5'; }
+            if(btnEndTurn) { btnEndTurn.disabled = true; btnEndTurn.style.opacity = '0.5'; }
+        } else if (turnState === 'SELECTING_TARGET') {
+            disableBtns(mainBtns, true);
+            disableBtns(defBtns, true);
+            disableBtns(skillBtns, true);
+            if(btnUndo) { btnUndo.disabled = true; btnUndo.style.opacity = '0.5'; }
+            if(btnEndTurn) { btnEndTurn.disabled = true; btnEndTurn.style.opacity = '0.5'; }
         } else {
             disableBtns(mainBtns, false);
             disableBtns(defBtns, false);
             disableBtns(skillBtns, false);
+
+            const btnAttack = document.getElementById('btn-attack');
+            if(btnAttack) { btnAttack.disabled = ap < 1; btnAttack.style.opacity = ap < 1 ? '0.5' : '1'; }
+            
+            const btnBlock = document.getElementById('btn-block');
+            if(btnBlock) { btnBlock.disabled = ap < 1; btnBlock.style.opacity = ap < 1 ? '0.5' : '1'; }
+            
+            const btnPrepare = document.getElementById('btn-prepare');
+            if(btnPrepare) { btnPrepare.disabled = ap < 1; btnPrepare.style.opacity = ap < 1 ? '0.5' : '1'; }
+            
+            const btnDodge = document.getElementById('btn-dodge');
+            if(btnDodge) { btnDodge.disabled = ap < 2; btnDodge.style.opacity = ap < 2 ? '0.5' : '1'; }
+            
+            if(btnSkill) { 
+                let canSkill = (ap >= 1 && prepStacks >= skillCost);
+                btnSkill.disabled = !canSkill; 
+                btnSkill.style.opacity = !canSkill ? '0.5' : '1'; 
+            }
+
+            if(btnUndo) {
+                btnUndo.disabled = queuedActions.length === 0;
+                btnUndo.style.opacity = queuedActions.length === 0 ? '0.5' : '1';
+            }
+            if(btnEndTurn) {
+                btnEndTurn.disabled = false;
+                btnEndTurn.style.opacity = '1';
+            }
         }
     }
 
@@ -423,6 +522,28 @@ class UIManager {
         if (menuType === 'main') this.combatMain.classList.remove('hidden');
         if (menuType === 'defend') this.combatDefend.classList.remove('hidden');
         if (menuType === 'skill') this.combatSkill.classList.remove('hidden');
+
+        const btnPrepareMenu = document.getElementById('btn-prepare-menu');
+        const btnPrepare = document.getElementById('btn-prepare');
+        if (this.game && this.game.state.rad >= 90) {
+            if (btnPrepareMenu) {
+                btnPrepareMenu.style.opacity = '0.5';
+                btnPrepareMenu.style.textDecoration = 'line-through';
+            }
+            if (btnPrepare) {
+                btnPrepare.style.opacity = '0.5';
+                btnPrepare.style.textDecoration = 'line-through';
+            }
+        } else {
+            if (btnPrepareMenu) {
+                btnPrepareMenu.style.opacity = '1';
+                btnPrepareMenu.style.textDecoration = 'none';
+            }
+            if (btnPrepare) {
+                btnPrepare.style.opacity = '1';
+                btnPrepare.style.textDecoration = 'none';
+            }
+        }
     }
 
     showInventory() {
@@ -439,6 +560,71 @@ class UIManager {
 
     hideBookshelf() {
         if(this.bookshelfModal) this.bookshelfModal.classList.add('hidden');
+    }
+
+    showCampNotes() {
+        if(this.campNotesModal) this.campNotesModal.classList.remove('hidden');
+    }
+
+    hideCampNotes() {
+        if(this.campNotesModal) this.campNotesModal.classList.add('hidden');
+    }
+
+    renderCampNotes(buildSystem) {
+        if (!buildSystem || !this.campNotesList) return;
+
+        const memorySlotsText = document.getElementById('camp-memory-slots-text');
+        if (memorySlotsText) {
+            memorySlotsText.innerText = `${buildSystem.equippedNotes.length}/${buildSystem.maxSlots}`;
+        }
+
+        this.campNotesList.innerHTML = '';
+        
+        // Allowed notes: startingEquippedNotes + runDiscoveredNotes + currently equipped notes
+        const allowedIds = new Set([
+            ...buildSystem.startingEquippedNotes, 
+            ...buildSystem.runDiscoveredNotes,
+            ...buildSystem.equippedNotes
+        ]);
+        
+        if (allowedIds.size === 0) {
+            this.campNotesList.innerHTML = '<p style="color:#aaa;">你目前沒有攜帶任何筆記...</p>';
+            return;
+        }
+
+        allowedIds.forEach(id => {
+            const note = buildSystem.noteDictionary[id];
+            if (!note) return;
+
+            const isEquipped = buildSystem.hasActiveNote(id);
+
+            const card = document.createElement('div');
+            card.className = 'note-card';
+            if (isEquipped) {
+                card.classList.add('equipped');
+            }
+
+            let descHtml = note.desc.replace(/\n/g, '<br>');
+            
+            let actionBtnHtml = '';
+            if (isEquipped) {
+                actionBtnHtml = `<button class="btn secondary action-btn" onclick="document.dispatchEvent(new CustomEvent('camp-note-unequip', {detail:'${id}'}))">卸下</button>`;
+            } else {
+                actionBtnHtml = `<button class="btn primary action-btn" onclick="document.dispatchEvent(new CustomEvent('camp-note-equip', {detail:'${id}'}))">裝備</button>`;
+            }
+
+            const count = buildSystem.craftedNotes.get(id) || 1;
+            const countStr = count > 1 ? ` <span style="font-size:0.8rem; color:#aaa;">x${count}</span>` : '';
+
+            card.innerHTML = `
+                <div style="font-weight: bold; font-size: 1.1rem; color: var(--accent-green); margin-bottom: 5px;">${note.name}${countStr}</div>
+                <div style="font-size: 0.9rem; color: #ccc; margin-bottom: 10px;">${descHtml}</div>
+                <div style="display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: auto;">
+                    ${actionBtnHtml}
+                </div>
+            `;
+            this.campNotesList.appendChild(card);
+        });
     }
 
     renderBookshelf(buildSystem) {
@@ -500,10 +686,12 @@ class UIManager {
                 }
             } else {
                 // Crafted
+                const count = buildSystem.craftedNotes.get(id) || 1;
+                const countStr = count > 1 ? ` <span style="font-size:0.8rem; color:#aaa;">x${count}</span>` : '';
                 const isEquipped = buildSystem.equippedNotes.includes(id);
                 itemDiv.className = `note-item crafted ${isEquipped ? 'equipped' : ''}`;
                 itemDiv.innerHTML = `
-                    <div class="note-title">${note.name}</div>
+                    <div class="note-title">${note.name}${countStr}</div>
                     <div class="note-desc">${note.desc}</div>
                     <div class="note-actions">
                         <button class="btn secondary btn-equip" style="padding: 5px 15px; font-size: 0.9rem;">
@@ -544,27 +732,43 @@ class UIManager {
     }
 
     renderInventory(equipment, items, useItemCb, equipItemCb, unequipItemCb) {
-        const itemDetailModal = document.getElementById('item-detail-modal');
-        const itemDetailName = document.getElementById('item-detail-name');
-        const itemDetailDesc = document.getElementById('item-detail-desc');
-        const btnItemConfirm = document.getElementById('btn-item-confirm');
-        const btnItemCancel = document.getElementById('btn-item-cancel');
+        try {
+            const itemDetailModal = document.getElementById('item-detail-modal');
+            const itemDetailName = document.getElementById('item-detail-name');
+            const itemDetailDesc = document.getElementById('item-detail-desc');
+            const btnItemConfirm = document.getElementById('btn-item-confirm');
+            const btnItemCancel = document.getElementById('btn-item-cancel');
 
-        if (btnItemCancel) {
-            btnItemCancel.onclick = () => {
-                itemDetailModal.classList.add('hidden');
-            };
-        }
+            if (btnItemCancel) {
+                btnItemCancel.onclick = () => {
+                    itemDetailModal.classList.add('hidden');
+                };
+            }
 
         const showItemDetail = (item, actionName, confirmCb) => {
             itemDetailName.innerText = item.name;
             let desc = "";
-            if (item.type === 'consumable' || item.type === 'material') {
+            if (item.type === 'note') {
+                desc = item.desc.replace(/\n/g, '<br>');
+                btnItemConfirm.style.display = 'none';
+            } else if (item.type === 'consumable' || item.type === 'material') {
                 let useText = "";
                 if (this.game && this.game.state.inCombat && this.game.inventorySystem) {
                     const sys = this.game.inventorySystem;
                     const left = Math.max(0, sys.maxItemsPerTurn - sys.itemsUsedThisTurn);
                     useText = `\n\n<span style="color:var(--accent-red);">本回合剩餘道具使用次數: ${left}</span>`;
+                } else if (this.game && !this.game.state.inCombat && this.game.inventorySystem) {
+                    const state = this.game.state;
+                    const isCamp = state.depth > 0 && state.depth % 10 === 0 && state.depth !== 50;
+                    const isHub = state.depth === 0;
+                    
+                    if (!isCamp && !isHub) {
+                        useText = `\n\n<span style="color:var(--accent-red);">（探索中無法使用消耗品，請至營地使用）</span>`;
+                        btnItemConfirm.style.display = 'none';
+                    } else if (this.game.inventorySystem.campConsumablesUsed.includes(item.id)) {
+                        useText = `\n\n<span style="color:var(--accent-red);">（本次營地休息已使用過此類消耗品）</span>`;
+                        btnItemConfirm.style.display = 'none';
+                    }
                 }
                 
                 let effectTxts = [];
@@ -577,7 +781,9 @@ class UIManager {
                     btnItemConfirm.style.display = 'none';
                 } else {
                     desc = `效果：${effectTxts.join('，')}${useText}\n\n確定要${actionName}嗎？`;
-                    btnItemConfirm.style.display = 'inline-block';
+                    if (useText === "") {
+                        btnItemConfirm.style.display = 'inline-block';
+                    }
                 }
             } else {
                 btnItemConfirm.style.display = 'inline-block';
@@ -605,7 +811,13 @@ class UIManager {
             
             if (item) {
                 contentEl.innerText = item.name;
-                slotEl.onclick = () => showItemDetail(item, '卸下', () => unequipItemCb(slot));
+                slotEl.onclick = () => {
+                    if (this.game && this.game.state.inCombat) {
+                        Logger.log("戰鬥中無法卸下裝備！", "negative");
+                    } else {
+                        showItemDetail(item, '卸下', () => unequipItemCb(slot));
+                    }
+                };
                 slotEl.style.borderColor = 'var(--accent-green)';
             } else {
                 contentEl.innerText = '';
@@ -616,9 +828,10 @@ class UIManager {
 
         // Render inventory list
         this.inventoryList.innerHTML = '';
-        if (items.length === 0) {
-            this.inventoryList.innerHTML = '<p style="color:#aaa;">背包空空如也...</p>';
-        } else {
+        let hasItems = false;
+        
+        if (items.length > 0) {
+            hasItems = true;
             items.forEach(item => {
                 const btn = document.createElement('button');
                 btn.className = 'btn secondary';
@@ -640,11 +853,45 @@ class UIManager {
                     let statsStr = statsTxt.length > 0 ? ` <span style="font-size:0.8rem; color:#888;">(${statsTxt.join(', ')})</span>` : '';
                     
                     btn.innerHTML = `${item.name}${statsStr}`;
-                    btn.onclick = () => showItemDetail(item, '裝備', () => equipItemCb(item.id));
+                    btn.onclick = () => {
+                        if (this.game && this.game.state.inCombat) {
+                            Logger.log("戰鬥中無法切換裝備！", "negative");
+                        } else {
+                            showItemDetail(item, '裝備', () => equipItemCb(item.id));
+                        }
+                    };
                 }
                 
                 this.inventoryList.appendChild(btn);
             });
+        }
+
+        // Render discovered notes in inventory
+        if (this.game && this.game.buildSystem) {
+            this.game.buildSystem.craftedNotes.forEach((count, noteId) => {
+                const note = this.game.buildSystem.noteDictionary[noteId];
+                if (note && count > 0) {
+                    hasItems = true;
+                    const btn = document.createElement('button');
+                    btn.className = 'btn secondary';
+                    btn.style.borderColor = 'var(--accent-orange)';
+                    
+                    const countStr = count > 1 ? ` <span style="color:#aaa;">x${count}</span>` : '';
+                    btn.innerHTML = `📄 ${note.name}${countStr}`;
+                    
+                    const itemLikeObj = {
+                        name: note.name,
+                        type: 'note',
+                        desc: note.desc
+                    };
+                    btn.onclick = () => showItemDetail(itemLikeObj, '關閉', () => {});
+                    this.inventoryList.appendChild(btn);
+                }
+            });
+        }
+        
+        if (!hasItems) {
+            this.inventoryList.innerHTML = '<p style="color:#aaa;">背包空空如也...</p>';
         }
 
         // Update Stats Display
@@ -674,6 +921,10 @@ class UIManager {
         }
         if (statDef) {
             statDef.innerText = `${totalDefBonus}`;
+        }
+        } catch (e) {
+            console.error("renderInventory Error:", e);
+            Logger.log(`渲染背包時發生錯誤: ${e.message}`, "negative");
         }
     }
 
