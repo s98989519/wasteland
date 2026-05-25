@@ -1,0 +1,800 @@
+class CombatSystem {
+    constructor(gameController) {
+        this.game = gameController;
+        this.prepStacks = 0;
+        this.enemies = [];
+        this.playerQueuedActions = [];
+        this.turnState = 'IDLE'; 
+        this.selectedActionType = null;
+        this.maxAp = 3;
+        this.ap = 3;
+    }
+
+    startCombat(enemyConfigs) {
+        this.game.state.inCombat = true;
+        this.enemies = enemyConfigs.map((cfg, index) => {
+            const hp = Math.floor(Math.random() * (cfg.maxHp - cfg.minHp + 1)) + cfg.minHp;
+            return {
+                id: index,
+                type: cfg.type || 'boar',
+                name: cfg.name,
+                hp: hp,
+                maxHp: hp,
+                minAtk: cfg.minAtk,
+                maxAtk: cfg.maxAtk,
+                isDead: false,
+                armor: 0,
+                state: 'normal',
+                atkBuff: 0,
+                dodgeNext: false,
+                nextAction: null
+            };
+        });
+        
+        if (this.game.inventorySystem) {
+            this.game.inventorySystem.resetTurnUsage();
+        }
+
+        this.game.ui.showCombatView(); // Show base UI first
+        Logger.log(`進入戰鬥！面對了 ${this.enemies.length} 個敵人。`, "important");
+        
+        // 重度輻射 (60~89 Rad): 戰鬥開場附加 2 回合虛弱
+        if (this.game.state.rad >= 60) {
+            this.game.state.buffs.weaknessTurns = Math.max(this.game.state.buffs.weaknessTurns, 3);
+            Logger.log("【重度輻射】細胞病變導致你開場即獲得 2 回合虛弱 (ATK -1)。", "negative");
+        }
+
+        this.startPlayerTurn();
+    }
+
+    startPlayerTurn() {
+        if (!this.game.state.inCombat) return;
+
+        if (this.game.state.buffs && this.game.state.buffs.weaknessTurns > 0) {
+            this.game.state.buffs.weaknessTurns--;
+            if (this.game.state.buffs.weaknessTurns === 0) {
+                Logger.log("你的虛弱狀態解除了！攻擊力恢復正常。", "positive");
+            }
+        }
+
+        if (this.game.buildSystem && this.game.buildSystem.hasActiveNote('spore_resistance')) {
+            if (this.game.state.hp < this.game.state.maxHp) {
+                this.game.heal(1);
+                Logger.log("【孢子抗性】使你回復 1 點生命。", "positive");
+            }
+        }
+
+        if (this.enemies.every(e => e.isDead)) {
+            this.winCombat();
+            return;
+        }
+
+        this.turnState = 'SELECTING_ACTION';
+        this.playerQueuedActions = [];
+        this.selectedActionType = null;
+        this.ap = this.maxAp;
+        
+        if (this.game.inventorySystem) {
+            this.game.inventorySystem.resetTurnUsage();
+        }
+
+        this.enemies.forEach(enemy => {
+            if (!enemy.isDead) {
+                if (enemy.state === 'preparing') {
+                    const dmg = Math.floor((Math.random() * (enemy.maxAtk - enemy.minAtk + 1) + enemy.minAtk) * 1.5) + enemy.atkBuff;
+                    enemy.nextAction = { type: 'charge', dmg: dmg };
+                } else if (enemy.state === 'stunned') {
+                    enemy.nextAction = { type: 'stunned', dmg: 0 };
+                } else {
+                    const r = Math.random();
+                    const baseDmg = Math.floor(Math.random() * (enemy.maxAtk - enemy.minAtk + 1)) + enemy.minAtk + enemy.atkBuff;
+                    
+                    if (enemy.type === 'green_mushroom') {
+                        if (r < 0.60) {
+                            enemy.nextAction = { type: 'attack', dmg: baseDmg };
+                        } else if (r < 0.85) { // 60% + 25% = 85%
+                            enemy.nextAction = { type: 'heal_spore', dmg: 0 };
+                        } else {
+                            enemy.nextAction = { type: 'burrow', dmg: 0 };
+                        }
+                    } else if (enemy.type === 'red_mushroom') {
+                        if (r < 0.70) {
+                            enemy.nextAction = { type: 'attack', dmg: baseDmg };
+                        } else if (r < 0.90) { // 70% + 20% = 90%
+                            enemy.nextAction = { type: 'frenzy_spore', dmg: 0 };
+                        } else {
+                            enemy.nextAction = { type: 'burrow', dmg: 0 };
+                        }
+                    } else { // boar
+                        if (r < 0.70) {
+                            enemy.nextAction = { type: 'attack', dmg: baseDmg };
+                        } else if (r < 0.90) {
+                            enemy.nextAction = { type: 'mud', dmg: 0 };
+                        } else {
+                            enemy.nextAction = { type: 'prepare', dmg: 0 };
+                        }
+                    }
+                }
+            }
+        });
+
+        this.updateUI();
+        this.game.updateUI(); // 確保遊戲大UI (狀態欄) 立即刷新
+    }
+
+    getWeaponSkill() {
+        if (this.game.inventorySystem && this.game.inventorySystem.equipment.weapon) {
+            const weaponId = this.game.inventorySystem.equipment.weapon.id;
+            if (weaponId === 'rusty_pipe') {
+                return { name: '鐵管橫掃', cost: 3, type: 'aoe' };
+            }
+        }
+        return { name: '全力一擊', cost: 2, type: 'single' };
+    }
+
+    selectAction(actionType) {
+        if (actionType === 'prepare' && this.game.state.rad >= 90) {
+            Logger.log("【輻射中毒】你身體劇痛無法集中精神，無法準備！", "negative");
+            return;
+        }
+
+        let apCost = actionType === 'dodge' ? 2 : 1;
+        if (this.ap < apCost) {
+            Logger.log("AP 不足！", "system");
+            return;
+        }
+
+        if (this.turnState === 'SELECTING_ACTION' || this.turnState === 'SELECTING_TARGET') {
+            const skill = this.getWeaponSkill();
+            
+            // 特別處理 prepare，不需要指定目標
+            if (actionType === 'prepare') {
+                this.ap -= apCost;
+                this.playerQueuedActions.push({ type: 'prepare', targetId: null });
+                this.turnState = 'SELECTING_ACTION';
+                this.selectedActionType = null;
+                this.updateUI();
+                return;
+            }
+
+            // 若為技能，檢查準備層數是否足夠
+            if (actionType === 'skill') {
+                let queuedSkills = this.playerQueuedActions.filter(a => a.type === 'skill').length;
+                let queuedPreps = this.playerQueuedActions.filter(a => a.type === 'prepare').length;
+                const virtualPrepStacks = this.prepStacks + queuedPreps;
+                if (virtualPrepStacks < (queuedSkills + 1) * skill.cost) {
+                    Logger.log(`${skill.name}發動失敗：準備層數不足！(需要 ${skill.cost} 層)`, "system");
+                    return;
+                }
+            }
+
+            this.selectedActionType = actionType;
+            this.turnState = 'SELECTING_TARGET';
+            
+            let actionName = actionType;
+            if (actionType === 'attack') actionName = "⚔️ 攻擊";
+            else if (actionType === 'block') actionName = "🛡️ 防禦";
+            else if (actionType === 'dodge') actionName = "💨 閃躲";
+            else if (actionType === 'skill') actionName = `💥 ${skill.name}`;
+            
+            Logger.log(`請點擊選擇 [${actionName}] 的目標...`, "system");
+            this.updateUI();
+        }
+    }
+
+    cancelActionSelection() {
+        if (this.turnState === 'SELECTING_TARGET') {
+            this.turnState = 'SELECTING_ACTION';
+            this.selectedActionType = null;
+            this.updateUI();
+        }
+    }
+
+    selectTarget(enemyId) {
+        if (this.turnState !== 'SELECTING_TARGET' || !this.selectedActionType) return;
+        
+        const enemy = this.enemies.find(e => e.id === enemyId);
+        if (!enemy || enemy.isDead) return;
+
+        let apCost = this.selectedActionType === 'dodge' ? 2 : 1;
+        if (this.ap < apCost) {
+            Logger.log("AP 不足！", "system");
+            this.cancelActionSelection();
+            return;
+        }
+
+        this.ap -= apCost;
+        this.playerQueuedActions.push({ type: this.selectedActionType, targetId: enemyId });
+        
+        // --- 檢查是否可以連續選擇 ---
+        let canContinue = false;
+        if (this.selectedActionType === 'skill') {
+            const skill = this.getWeaponSkill();
+            let queuedSkills = this.playerQueuedActions.filter(a => a.type === 'skill').length;
+            let queuedPreps = this.playerQueuedActions.filter(a => a.type === 'prepare').length;
+            const virtualPrepStacks = this.prepStacks + queuedPreps;
+            if (this.ap >= 1 && virtualPrepStacks >= (queuedSkills + 1) * skill.cost) {
+                canContinue = true;
+            }
+        } else {
+            let nextCost = this.selectedActionType === 'dodge' ? 2 : 1;
+            if (this.ap >= nextCost) {
+                canContinue = true;
+            }
+        }
+
+        if (!canContinue) {
+            this.turnState = 'SELECTING_ACTION';
+            this.selectedActionType = null;
+        }
+        
+        this.updateUI();
+    }
+
+    undoLastAction() {
+        if (this.playerQueuedActions.length > 0) {
+            const lastAction = this.playerQueuedActions.pop();
+            let apCost = lastAction.type === 'dodge' ? 2 : 1;
+            this.ap += apCost;
+            if (this.ap > this.maxAp) this.ap = this.maxAp;
+            this.turnState = 'SELECTING_ACTION';
+            this.selectedActionType = null;
+            this.updateUI();
+        }
+    }
+
+    endTurnQueue() {
+        if (this.turnState === 'SELECTING_ACTION' || this.turnState === 'SELECTING_TARGET') {
+            this.turnState = 'EXECUTING';
+            this.selectedActionType = null;
+            this.updateUI();
+            setTimeout(() => this.executeTurn(), 500);
+        }
+    }
+
+    async executeTurn() {
+        Logger.log("--- 回合結算 ---", "important");
+
+        // 玩家行動階段
+        for (const action of this.playerQueuedActions) {
+            const enemy = action.targetId !== null ? this.enemies.find(e => e.id === action.targetId) : null;
+            if (action.type === 'prepare' || (enemy && !enemy.isDead)) {
+                await this.executePlayerAction(action.type, enemy);
+            }
+        }
+
+        if (this.game.state.buffs && this.game.state.buffs.weaknessTurns > 0) {
+            this.game.state.buffs.weaknessTurns--;
+            this.game.ui.updateStats(this.game.state);
+        }
+
+        if (this.enemies.every(e => e.isDead)) {
+            this.winCombat();
+            return;
+        }
+
+        Logger.log("--- 敵方攻擊 ---", "important");
+
+        const aliveEnemiesPostPlayer = this.enemies.filter(e => !e.isDead);
+        for (const enemy of aliveEnemiesPostPlayer) {
+            await this.executeEnemyAction(enemy);
+            if (this.game.state.hp <= 0) break;
+        }
+
+        if (this.game.state.hp <= 0) {
+            this.game.die();
+            return;
+        }
+
+        setTimeout(() => this.startPlayerTurn(), 500);
+    }
+
+    async executePlayerAction(type, enemy) {
+        return new Promise(resolve => {
+            if (enemy && enemy.isDead) return resolve();
+
+            if (type === 'prepare') {
+                this.prepStacks = Math.min(3, this.prepStacks + 1);
+                
+                // 調整呼吸：解除虛弱，恢復 2 HP
+                let healed = false;
+                if (this.game.state.buffs && this.game.state.buffs.weaknessTurns > 0) {
+                    this.game.state.buffs.weaknessTurns = 0;
+                    Logger.log("你深呼吸調整節奏，解除了虛弱狀態！", "positive");
+                    healed = true;
+                }
+                if (this.game.state.hp < this.game.state.maxHp) {
+                    this.game.state.hp = Math.min(this.game.state.maxHp, this.game.state.hp + 2);
+                    Logger.log("你在戰鬥中找尋喘息空間，恢復了 2 點生命。", "positive");
+                    healed = true;
+                } 
+                if (!healed) {
+                    Logger.log("你屏氣凝神，獲得了 1 層準備。", "positive");
+                }
+                
+                this.game.ui.updateStats(this.game.state);
+            } else if (type === 'attack') {
+                let baseMinAtk = 7, baseMaxAtk = 11;
+                if (this.game.inventorySystem) {
+                    const equip = this.game.inventorySystem.equipment;
+                    ['upperBody', 'lowerBody', 'weapon', 'necklace', 'ring', 'accessory'].forEach(s => {
+                        if (equip[s] && equip[s].attackBonus) { baseMinAtk += equip[s].attackBonus; baseMaxAtk += equip[s].attackBonus; }
+                    });
+                }
+                if (this.game.state.buffs && this.game.state.buffs.weaknessTurns > 0) {
+                    baseMinAtk = Math.max(1, baseMinAtk - 1);
+                    baseMaxAtk = Math.max(1, baseMaxAtk - 1);
+                }
+                if (this.game.buildSystem && this.game.buildSystem.hasActiveNote('beast_instinct')) {
+                    baseMinAtk += 2; baseMaxAtk += 2;
+                }
+                const dmg = Math.floor(Math.random() * (baseMaxAtk - baseMinAtk + 1)) + baseMinAtk;
+                Logger.log(`你對 ${enemy.name} 發起攻擊，造成 ${dmg} 點傷害！`);
+                this.damageEnemy(enemy, dmg);
+            } else if (type === 'skill') {
+                const skill = this.getWeaponSkill();
+                if (this.prepStacks >= skill.cost) {
+                    this.prepStacks -= skill.cost;
+                    
+                    if (skill.type === 'aoe') {
+                        Logger.log(`你揮舞武器，對所有敵人發動 ${skill.name}！`, "important");
+                        const aliveEnemies = this.enemies.filter(e => !e.isDead);
+                        aliveEnemies.forEach(target => {
+                            let baseMinAtk = 7, baseMaxAtk = 11;
+                            if (this.game.inventorySystem) {
+                                const equip = this.game.inventorySystem.equipment;
+                                ['upperBody', 'lowerBody', 'weapon', 'necklace', 'ring', 'accessory'].forEach(s => {
+                                    if (equip[s] && equip[s].attackBonus) { baseMinAtk += equip[s].attackBonus; baseMaxAtk += equip[s].attackBonus; }
+                                });
+                            }
+                            if (this.game.state.buffs && this.game.state.buffs.weaknessTurns > 0) {
+                                baseMinAtk = Math.max(1, baseMinAtk - 1);
+                                baseMaxAtk = Math.max(1, baseMaxAtk - 1);
+                            }
+                            if (this.game.buildSystem && this.game.buildSystem.hasActiveNote('beast_instinct')) {
+                                baseMinAtk += 2; baseMaxAtk += 2;
+                            }
+                            const baseDmg = Math.floor(Math.random() * (baseMaxAtk - baseMinAtk + 1)) + baseMinAtk;
+                            const finalDmg = Math.floor(baseDmg * 1.3);
+                            Logger.log(`${skill.name} 命中了 ${target.name}，造成 ${finalDmg} 點傷害！`);
+                            this.damageEnemy(target, finalDmg);
+                            
+                            // 打斷機制
+                            if (target.state === 'preparing' || target.nextAction.type === 'heal_spore' || target.nextAction.type === 'frenzy_spore') {
+                                Logger.log(`<span style="color:var(--accent-orange);">【打斷！】</span>強力的攻擊硬生生打斷了 ${target.name} 的動作！`, "positive");
+                                target.state = 'interrupted';
+                                target.nextAction = { type: 'stunned', dmg: 0 };
+                            }
+                        });
+                    } else {
+                        let baseMinAtk = 7, baseMaxAtk = 11;
+                        if (this.game.inventorySystem) {
+                            const equip = this.game.inventorySystem.equipment;
+                            ['upperBody', 'lowerBody', 'weapon', 'necklace', 'ring', 'accessory'].forEach(s => {
+                                if (equip[s] && equip[s].attackBonus) { baseMinAtk += equip[s].attackBonus; baseMaxAtk += equip[s].attackBonus; }
+                            });
+                        }
+                        if (this.game.state.buffs && this.game.state.buffs.weaknessTurns > 0) {
+                            baseMinAtk = Math.max(1, baseMinAtk - 1);
+                            baseMaxAtk = Math.max(1, baseMaxAtk - 1);
+                        }
+                        if (this.game.buildSystem && this.game.buildSystem.hasActiveNote('beast_instinct')) {
+                            baseMinAtk += 2; baseMaxAtk += 2;
+                        }
+                        const multiplier = 1.2 + Math.random() * 0.4;
+                        const baseDmg = Math.floor(Math.random() * (baseMaxAtk - baseMinAtk + 1)) + baseMinAtk;
+                        const finalDmg = Math.floor(baseDmg * multiplier);
+                        Logger.log(`你對 ${enemy.name} 釋放 ${skill.name}！造成 ${finalDmg} 點傷害！`, "important");
+                        this.damageEnemy(enemy, finalDmg);
+                        
+                        // 打斷機制
+                        if (enemy.state === 'preparing' || enemy.nextAction.type === 'heal_spore' || enemy.nextAction.type === 'frenzy_spore') {
+                            Logger.log(`<span style="color:var(--accent-orange);">【打斷！】</span>強力的攻擊硬生生打斷了 ${enemy.name} 的動作！`, "positive");
+                            enemy.state = 'interrupted';
+                            enemy.nextAction = { type: 'stunned', dmg: 0 };
+                        }
+                    }
+                } else {
+                    Logger.log(`對 ${enemy.name} 的技能發動失敗：準備層數不足！`);
+                }
+            } else if (type === 'block') {
+                Logger.log(`你對 ${enemy.name} 擺出防禦姿態。`);
+            } else if (type === 'dodge') {
+                Logger.log(`你準備主動翻滾閃避 ${enemy.name} 的重擊。`);
+            }
+
+            this.updateUI();
+            setTimeout(resolve, 200);
+        });
+    }
+
+    async executeEnemyAction(enemy) {
+        return new Promise(resolve => {
+            if (enemy.isDead || !this.game.state.inCombat) return resolve();
+
+            const actionType = enemy.nextAction.type;
+
+            if (actionType === 'stunned') {
+                if (enemy.state === 'interrupted') {
+                    Logger.log(`${enemy.name} 的行動被打斷而無法動彈！`);
+                } else {
+                    Logger.log(`${enemy.name} 因為猛烈衝撞或遭到完美閃避而暈眩，無法行動！`);
+                }
+                enemy.state = 'normal';
+                setTimeout(resolve, 200);
+                return;
+            } else if (actionType === 'prepare') {
+                Logger.log(`${enemy.name} 前腳刨地，準備發起猛烈的衝撞！`);
+                enemy.state = 'preparing';
+                setTimeout(resolve, 200);
+                return;
+            } else if (actionType === 'mud') {
+                Logger.log(`${enemy.name} 在泥巴中打滾，獲得了 5 點護甲！`, "positive");
+                this.game.ui.showFloatingText(enemy.id, "裹上泥巴", "var(--accent-orange)");
+                enemy.armor += 5;
+                setTimeout(resolve, 200);
+                return;
+            } else if (actionType === 'heal_spore') {
+                Logger.log(`${enemy.name} 散發出治療孢子，為所有友方回復 5 點生命！`, "positive");
+                this.game.ui.showFloatingText(enemy.id, "治療孢子", "var(--accent-green)");
+                this.enemies.forEach(e => {
+                    if (!e.isDead) {
+                        const healAmount = Math.min(e.maxHp - e.hp, 5);
+                        e.hp += healAmount;
+                        if (healAmount > 0 && this.game.ui.showFloatingText) {
+                            setTimeout(() => {
+                                this.game.ui.showFloatingText(e.id, `+${healAmount}`, "var(--accent-green)");
+                            }, 200);
+                        }
+                    }
+                });
+                setTimeout(resolve, 200);
+                return;
+            } else if (actionType === 'frenzy_spore') {
+                Logger.log(`${enemy.name} 散發出狂暴孢子，所有友方攻擊力提升 2 點！`, "negative");
+                this.game.ui.showFloatingText(enemy.id, "狂暴孢子", "var(--accent-red)");
+                this.enemies.forEach(e => {
+                    if (!e.isDead) {
+                        e.atkBuff += 2;
+                    }
+                });
+                setTimeout(resolve, 200);
+                return;
+            } else if (actionType === 'burrow') {
+                Logger.log(`${enemy.name} 使用縮地，將閃避下一次受到的傷害！`, "system");
+                this.game.ui.showFloatingText(enemy.id, "縮地", "#cccccc");
+                enemy.dodgeNext = true;
+                setTimeout(resolve, 200);
+                return;
+            }
+
+            if (actionType === 'charge') {
+                this.game.ui.showFloatingText(enemy.id, "衝撞", "var(--accent-red)");
+                enemy.state = 'stunned';
+            }
+
+            let rawDmg = enemy.nextAction.dmg;
+            let totalDefBonus = 0;
+            if (this.game.inventorySystem) {
+                const equip = this.game.inventorySystem.equipment;
+                ['upperBody', 'lowerBody', 'weapon', 'necklace', 'ring', 'accessory'].forEach(s => {
+                    if (equip[s] && equip[s].defenseBonus) totalDefBonus += equip[s].defenseBonus;
+                });
+            }
+            
+            // 找出玩家對此敵人的所有防禦性排程動作
+            const defActions = this.playerQueuedActions.filter(a => a.targetId === enemy.id && (a.type === 'block' || a.type === 'dodge'));
+            const hasBlock = defActions.some(a => a.type === 'block');
+            const hasDodge = defActions.some(a => a.type === 'dodge');
+
+            let finalDmg = rawDmg;
+            let actionText = actionType === 'charge' ? `發起了猛烈的衝撞` : `發起了攻擊`;
+            let msg = "";
+            let dodged = false;
+            let blockStr = "";
+
+            // 全局被動閃避
+            let passiveDodgeChance = 0.10;
+            if (this.game.buildSystem && this.game.buildSystem.hasActiveNote('beast_instinct')) {
+                passiveDodgeChance += 0.05;
+            }
+            let isPassiveDodged = Math.random() <= passiveDodgeChance;
+
+            if (actionType === 'attack') {
+                if (hasBlock) {
+                    finalDmg = Math.floor(finalDmg * 0.50); // 50% 減傷
+                    blockStr = `<span style="color:var(--accent-green);">【格擋】</span>減免了 50% 傷害！`;
+                    msg = `${enemy.name} 對你${actionText}！你${blockStr}`;
+                } else if (hasDodge) {
+                    dodged = true;
+                    msg = `${enemy.name} 對你${actionText}！你浪費了體力<span style="color:var(--accent-green);">【大閃避】</span>了普攻。`;
+                } else if (isPassiveDodged) {
+                    dodged = true;
+                    msg = `${enemy.name} 對你${actionText}！你<span style="color:var(--accent-green);">【幸運閃避】</span>了攻擊！`;
+                } else {
+                    msg = `${enemy.name} 對你${actionText}！`;
+                }
+            } else if (actionType === 'charge') {
+                if (hasDodge) {
+                    dodged = true;
+                    enemy.state = 'stunned';
+                    msg = `${enemy.name} 對你${actionText}！你施展<span style="color:var(--accent-green);">【極限翻滾】</span>完全閃過，敵人因撲空而暈眩！`;
+                } else if (hasBlock) {
+                    this.prepStacks = 0;
+                    finalDmg = Math.floor(finalDmg * 1.5); // 破防 150% 傷害
+                    blockStr = `<span style="color:var(--accent-red);">【破防】</span>！你失去了所有準備層數！`;
+                    msg = `${enemy.name} 對你${actionText}！你的防禦遭到${blockStr}`;
+                } else if (isPassiveDodged) {
+                    dodged = true;
+                    msg = `${enemy.name} 對你${actionText}！你<span style="color:var(--accent-green);">【幸運閃避】</span>了致命重擊！`;
+                } else {
+                    msg = `${enemy.name} 對你${actionText}！`;
+                }
+            }
+
+            if (dodged) {
+                finalDmg = 0;
+            } else {
+                finalDmg = Math.max(0, finalDmg - totalDefBonus);
+            }
+
+            let armorBlocked = 0;
+            if (this.game.state.armor > 0) {
+                armorBlocked = Math.min(this.game.state.armor, finalDmg);
+            }
+            let actualHpDamage = finalDmg - armorBlocked;
+
+            let reductions = [];
+            if (!dodged && totalDefBonus > 0) reductions.push(`${totalDefBonus} <span style="color:gray;">裝備防禦</span>`);
+            if (armorBlocked > 0) reductions.push(`${armorBlocked} <span style="color:var(--accent-orange);">護甲</span>`);
+            
+            if (actualHpDamage > 0 || armorBlocked > 0) {
+                if (reductions.length > 0) {
+                    msg += ` 造成了 ${actualHpDamage} ( ${rawDmg} - ${reductions.join(' - ')} ) 點傷害。`;
+                } else {
+                    msg += ` 造成了 ${actualHpDamage} 點傷害。`;
+                }
+            } else if (!dodged && finalDmg <= 0 && rawDmg > 0) {
+                msg += ` 造成了 0 點傷害（完全被防禦吸收）。`;
+            }
+
+            Logger.log(msg, actualHpDamage > 0 ? "important" : "positive");
+            
+            if (armorBlocked > 0) {
+                this.game.state.armor -= armorBlocked;
+            }
+            if (actualHpDamage > 0) {
+                this.game.state.hp -= actualHpDamage;
+                if (this.game.state.hp < 0) this.game.state.hp = 0;
+            }
+            this.game.ui.updateStats(this.game.state);
+            
+            setTimeout(resolve, 200);
+        });
+    }
+
+    damageEnemy(enemy, amount) {
+        if (enemy.dodgeNext) {
+            enemy.dodgeNext = false;
+            Logger.log(`${enemy.name} 憑藉縮地，完美閃避了這次攻擊！`, "negative");
+            return;
+        }
+
+        if (enemy.armor > 0) {
+            const blocked = Math.min(enemy.armor, amount);
+            enemy.armor -= blocked;
+            amount -= blocked;
+            if (amount > 0) {
+                Logger.log(`護甲抵擋了 ${blocked} 點傷害，對 ${enemy.name} 造成 ${amount} 點傷害！`);
+            } else {
+                Logger.log(`護甲完全抵擋了攻擊！(${enemy.name} 扣除了 ${blocked} 點護甲)`);
+            }
+        }
+        
+        if (amount > 0) {
+            enemy.hp -= amount;
+            if (this.game.ui.showFloatingText) {
+                this.game.ui.showFloatingText(enemy.id, `-${amount}`, "var(--accent-red)");
+            }
+        }
+
+        if (enemy.hp <= 0) {
+            enemy.hp = 0;
+            enemy.isDead = true;
+            Logger.log(`${enemy.name} 倒下了！`, "positive");
+
+            // --- 死亡觸發效果 ---
+            if (enemy.type === 'red_mushroom') {
+                Logger.log(`${enemy.name} 死亡時噴發出狂暴孢子！所有存活的敵人獲得 1 層狂暴 (+2 ATK)！`, "negative");
+                if (this.game.ui.showFloatingText) this.game.ui.showFloatingText(enemy.id, "死亡狂暴！", "var(--accent-red)");
+                this.enemies.forEach(e => {
+                    if (!e.isDead) {
+                        e.atkBuff += 2;
+                    }
+                });
+            } else if (enemy.type === 'green_mushroom') {
+                Logger.log(`${enemy.name} 死亡時散發出治療孢子！所有存活的敵人恢復 8 點生命！`, "negative");
+                if (this.game.ui.showFloatingText) this.game.ui.showFloatingText(enemy.id, "死亡治療！", "var(--accent-green)");
+                this.enemies.forEach(e => {
+                    if (!e.isDead) {
+                        const healAmount = Math.min(e.maxHp - e.hp, 8);
+                        e.hp += healAmount;
+                        if (healAmount > 0 && this.game.ui.showFloatingText) {
+                            setTimeout(() => {
+                                this.game.ui.showFloatingText(e.id, `+${healAmount}`, "var(--accent-green)");
+                            }, 200);
+                        }
+                    }
+                });
+            }
+        }
+    }
+
+    winCombat() {
+        Logger.log(`戰鬥勝利！`, "positive");
+        
+        let dropDetailsHtml = `<ul style="list-style:none; padding:0; margin: 15px 0; font-size: 1rem;">`;
+        const aggregatedDrops = {};
+        
+        this.enemies.forEach(enemy => {
+            let drops = [];
+            
+            if (enemy.type === 'boar') {
+                let r = Math.random();
+                let mane = r < 0.2 ? 0 : (r < 0.7 ? 1 : 2);
+                r = Math.random();
+                let pelt = r < 0.2 ? 0 : (r < 0.7 ? 1 : 2);
+                let tusk = Math.random() < 0.05 ? 1 : 0;
+                let pork = Math.random() < 0.40 ? 1 : 0;
+
+                if (mane) { drops.push(`${mane}x 鬃毛`); aggregatedDrops['boar_mane'] = (aggregatedDrops['boar_mane'] || 0) + mane; }
+                if (pelt) { drops.push(`${pelt}x 毛皮`); aggregatedDrops['boar_pelt'] = (aggregatedDrops['boar_pelt'] || 0) + pelt; }
+                if (tusk) { drops.push(`${tusk}x 獠牙`); aggregatedDrops['boar_tusk'] = (aggregatedDrops['boar_tusk'] || 0) + tusk; }
+                if (pork) { drops.push(`${pork}x 生豬肉`); aggregatedDrops['boar_meat'] = (aggregatedDrops['boar_meat'] || 0) + pork; }
+            } else if (enemy.type === 'green_mushroom' || enemy.type === 'red_mushroom') {
+                let r = Math.random();
+                let spore = r < 0.3 ? 0 : (r < 0.8 ? 1 : 2); // 70% chance to drop 1-2 spores
+                let cap = Math.random() < 0.25 ? 1 : 0; // 25% chance to drop cap
+                
+                if (spore) { drops.push(`${spore}x 奇異孢子`); aggregatedDrops['strange_spore'] = (aggregatedDrops['strange_spore'] || 0) + spore; }
+                
+                if (enemy.type === 'green_mushroom' && cap) { 
+                    drops.push(`${cap}x 綠色菇傘`); aggregatedDrops['green_cap'] = (aggregatedDrops['green_cap'] || 0) + cap; 
+                } else if (enemy.type === 'red_mushroom' && cap) { 
+                    drops.push(`${cap}x 紅色菇傘`); aggregatedDrops['red_cap'] = (aggregatedDrops['red_cap'] || 0) + cap; 
+                }
+            }
+            
+            let dropStr = drops.length > 0 ? drops.join('，') : '什麼都沒掉落';
+            dropDetailsHtml += `<li style="margin-bottom: 8px;">${enemy.name} 掉落了： <span style="color:var(--accent-green);">${dropStr}</span></li>`;
+            Logger.log(`${enemy.name} 掉落了：${dropStr}`, "system");
+        });
+        
+        let droppedNotes = new Set();
+        if (this.game.buildSystem) {
+            this.enemies.forEach(enemy => {
+                if (enemy.type === 'boar' && Math.random() < 0.1) droppedNotes.add('beast_instinct');
+                else if ((enemy.type === 'green_mushroom' || enemy.type === 'red_mushroom') && Math.random() < 0.1) droppedNotes.add('spore_resistance');
+            });
+            droppedNotes.forEach(noteId => {
+                const note = this.game.buildSystem.noteDictionary[noteId];
+                if (note) {
+                    this.game.buildSystem.discoverNote(noteId);
+                }
+            });
+        }
+        
+        let totalStrs = [];
+        if (aggregatedDrops['boar_mane']) {
+            this.game.inventorySystem.addItem('boar_mane', '鬃毛', 'material', {}, aggregatedDrops['boar_mane']);
+            totalStrs.push(`${aggregatedDrops['boar_mane']}x 鬃毛`);
+        }
+        if (aggregatedDrops['boar_pelt']) {
+            this.game.inventorySystem.addItem('boar_pelt', '毛皮', 'material', { armorBonus: 4 }, aggregatedDrops['boar_pelt']);
+            totalStrs.push(`${aggregatedDrops['boar_pelt']}x 毛皮`);
+        }
+        if (aggregatedDrops['boar_tusk']) {
+            this.game.inventorySystem.addItem('boar_tusk', '獠牙', 'material', {}, aggregatedDrops['boar_tusk']);
+            totalStrs.push(`${aggregatedDrops['boar_tusk']}x 獠牙`);
+        }
+        if (aggregatedDrops['boar_meat']) {
+            this.game.inventorySystem.addItem('boar_meat', '生豬肉', 'consumable', { heal: 15, debuff: 'weakness' }, aggregatedDrops['boar_meat']);
+            totalStrs.push(`${aggregatedDrops['boar_meat']}x 生豬肉`);
+        }
+        if (aggregatedDrops['strange_spore']) {
+            this.game.inventorySystem.addItem('strange_spore', '奇異孢子', 'material', {}, aggregatedDrops['strange_spore']);
+            totalStrs.push(`${aggregatedDrops['strange_spore']}x 奇異孢子`);
+        }
+        if (aggregatedDrops['green_cap']) {
+            this.game.inventorySystem.addItem('green_cap', '綠色菇傘', 'consumable', { heal: 10 }, aggregatedDrops['green_cap']);
+            totalStrs.push(`${aggregatedDrops['green_cap']}x 綠色菇傘`);
+        }
+        if (aggregatedDrops['red_cap']) {
+            this.game.inventorySystem.addItem('red_cap', '紅色菇傘', 'consumable', { attackBonus: 1 }, aggregatedDrops['red_cap']); 
+            totalStrs.push(`${aggregatedDrops['red_cap']}x 紅色菇傘`);
+        }
+        
+        let totalStr = totalStrs.length > 0 ? totalStrs.join('，') : '無';
+        dropDetailsHtml += `</ul><div style="margin-top: 15px; border-top: 1px solid #444; padding-top: 15px; font-weight: bold; font-size: 1.1rem;">總計獲得： <span style="color:var(--accent-green);">${totalStr}</span></div>`;
+        
+        if (droppedNotes.size > 0) {
+            let notesStr = Array.from(droppedNotes).map(id => this.game.buildSystem.noteDictionary[id]?.name).filter(Boolean).join('，');
+            dropDetailsHtml += `<div style="margin-top: 10px; font-weight: bold; font-size: 1.1rem;">獲得筆記： <span style="color:var(--accent-orange);">${notesStr}</span></div>`;
+        }
+        
+        this.endCombat();
+        
+        if (this.game.ui && this.game.ui.showResultModal) {
+            this.game.ui.showResultModal(
+                "戰鬥勝利！",
+                `你在屍骸附近找到了些許物資。\n${dropDetailsHtml}`,
+                () => {
+                    this.game.proceedToNextStep();
+                }
+            );
+        } else {
+            setTimeout(() => this.game.proceedToNextStep(), 1500);
+        }
+    }
+
+    endCombat() {
+        this.game.state.inCombat = false;
+        if (this.prepStacks > 3) {
+            this.prepStacks = 3;
+        }
+        this.game.ui.hideCombatView();
+    }
+
+    updateUI() {
+        if (this.game.ui && this.game.state.inCombat) {
+            let displayPrepStacks = this.prepStacks;
+            if (this.turnState !== 'EXECUTING') {
+                const skill = this.getWeaponSkill();
+                let queuedSkills = this.playerQueuedActions.filter(a => a.type === 'skill').length;
+                let queuedPreps = this.playerQueuedActions.filter(a => a.type === 'prepare').length;
+                displayPrepStacks = displayPrepStacks + queuedPreps - (queuedSkills * skill.cost);
+            }
+            this.game.ui.renderCombatState(this.enemies, displayPrepStacks, this.playerQueuedActions, this.turnState, this.selectedActionType, this.ap, this.maxAp);
+        }
+    }
+
+    exportData() {
+        return {
+            enemies: this.enemies,
+            turn: this.turn,
+            combatLog: this.combatLog,
+            prepStacks: this.prepStacks,
+            playerQueuedActions: this.playerQueuedActions,
+            turnState: this.turnState,
+            selectedActionType: this.selectedActionType,
+            ap: this.ap,
+            maxAp: this.maxAp
+        };
+    }
+
+    importData(data) {
+        if (data.enemies) this.enemies = data.enemies;
+        if (data.turn !== undefined) this.turn = data.turn;
+        if (data.combatLog) this.combatLog = data.combatLog;
+        if (data.prepStacks !== undefined) this.prepStacks = data.prepStacks;
+        
+        if (data.playerQueuedActions) {
+            if (Array.isArray(data.playerQueuedActions)) {
+                this.playerQueuedActions = data.playerQueuedActions;
+            } else {
+                // Old save format where it was an object. Clear it to avoid crashing.
+                this.playerQueuedActions = [];
+            }
+        } else {
+            this.playerQueuedActions = [];
+        }
+
+        if (data.turnState) this.turnState = data.turnState;
+        if (data.selectedActionType) this.selectedActionType = data.selectedActionType;
+        if (data.ap !== undefined) this.ap = data.ap;
+        else this.ap = 3; // Default for old saves
+        
+        if (data.maxAp !== undefined) this.maxAp = data.maxAp;
+        else this.maxAp = 3; // Default for old saves
+    }
+}
